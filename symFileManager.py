@@ -203,7 +203,7 @@ class SymFileManager:
             break
           fetchedSymbols[(pdbName, pdbId)] = symbolInfo
           fetchedCount += symbolInfo.GetEntryCount()
-          print "fetchedCount = " + str(fetchedCount) + "  after " + pdbName + "/" + pdbId
+          #print "fetchedCount = " + str(fetchedCount) + "  after " + pdbName + "/" + pdbId
         else:
           LogError("Couldn't fetch .sym file symbols for " + symbolFilePath)
           continue
@@ -219,13 +219,13 @@ class SymFileManager:
           self.sCache[pdbName] = {}
 
         if pdbId in self.sCache[pdbName]:
-          print pdbName, "version", pdbId, "already in cache"
+          #print pdbName, "version", pdbId, "already in cache"
           continue
 
         newSymbolFile = fetchedSymbols[(pdbName, pdbId)]
         self.sCache[pdbName][pdbId] = newSymbolFile
         self.sCacheCount += newSymbolFile.GetEntryCount()
-        print "Cache has " + str(self.sCacheCount) + " entries after inserting prefetched " + pdbName + "/" + pdbId
+        #print "Cache has " + str(self.sCacheCount) + " entries after inserting prefetched " + pdbName + "/" + pdbId
 
         # Move new symbols to front of MRU list to give them a chance
         self.UpdateMruList(pdbName, pdbId)
@@ -242,21 +242,14 @@ class SymFileManager:
     self.sMruSymbols.insert(0, libId)
 
   def MaybeEvict(self, freeEntriesNeeded):
-    # TODO: delete this stanza
-    total = 0
-    for (pdbName, pdbId) in self.sMruSymbols:
-      total += self.sCache[pdbName][pdbId].GetEntryCount()
-    if total != self.sCacheCount:
-      LogError("Incoherent cache sizes!!!!!!!!!!!!!!! " + str(total) + " != " + str(self.sCacheCount))
-
     maxCacheSize = self.sOptions["maxCacheEntries"]
     LogTrace("Cache occupancy before MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
-    print "Current MRU: " + str(self.sMruSymbols)
-    print "Maybe evicting to make room for ", freeEntriesNeeded, " new entries"
+    #print "Current MRU: " + str(self.sMruSymbols)
+    #print "Maybe evicting to make room for ", freeEntriesNeeded, " new entries"
 
     if self.sCacheCount == 0 or self.sCacheCount + freeEntriesNeeded <= maxCacheSize:
       # No need to lock mutex here, this doesn't need to be 100%
-      print "Sufficient room for new entries, no need to evict"
+      #print "Sufficient room for new entries, no need to evict"
       return
 
     # If adding the new entries would exceed the max cache size,
@@ -264,7 +257,7 @@ class SymFileManager:
     numOldEntriesAfterEvict = max(0, (0.70 * maxCacheSize) - freeEntriesNeeded)
     numToEvict = self.sCacheCount - numOldEntriesAfterEvict
 
-    print "Evicting: " + str(numToEvict)
+    #print "Evicting: " + str(numToEvict)
 
     # Evict symbols until evict quota is met, starting with least recently used
     for (pdbName, pdbId) in reversed(self.sMruSymbols):
@@ -272,7 +265,7 @@ class SymFileManager:
         break
 
       evicteeCount = self.sCache[pdbName][pdbId].GetEntryCount()
-      print "Evicting symbols at " + pdbName + "/" + pdbId + ": " + str(evicteeCount) + " entries"
+      #print "Evicting symbols at " + pdbName + "/" + pdbId + ": " + str(evicteeCount) + " entries"
 
       del self.sCache[pdbName][pdbId]
       self.sCacheCount -= evicteeCount
@@ -280,6 +273,6 @@ class SymFileManager:
 
       numToEvict -= evicteeCount
 
-    print "MRU after: " + str(self.sMruSymbols)
+    #print "MRU after: " + str(self.sMruSymbols)
     LogTrace("Cache occupancy after MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
 
