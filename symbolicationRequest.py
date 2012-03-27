@@ -136,7 +136,7 @@ class SymbolicationRequest:
       libSymbolMap = self.symFileManager.GetLibSymbolMap(pdbName, pdbSig, pdbAge)
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(pc - startAddress)
-      symbolicatedStack.append(functionName + " in " + libName)
+      symbolicatedStack.append(functionName + " (in " + libName + ")")
 
     return symbolicatedStack
 
