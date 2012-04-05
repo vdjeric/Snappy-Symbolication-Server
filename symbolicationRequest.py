@@ -133,18 +133,21 @@ class SymbolicationRequest:
 
       [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
 
-      functionName = "???"
 
       if (pdbName, pdbSig, pdbAge) in missingSymFiles:
         # Don't look for a missing lib multiple times in one request
-        symbolicatedStack.append(functionName + " (in " + libName + ")")
+        symbolicatedStack.append("??? (in " + libName + ")")
         continue
 
+      functionName = None
       libSymbolMap = self.symFileManager.GetLibSymbolMap(pdbName, pdbSig, pdbAge)
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(pc - startAddress)
       else:
         missingSymFiles.append((pdbName, pdbSig, pdbAge))
+
+      if functionName == None:
+        functionName = "???"
       symbolicatedStack.append(functionName + " (in " + libName + ")")
 
     return symbolicatedStack

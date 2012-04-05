@@ -109,7 +109,7 @@ class SymFileManager:
       for line in symFile:
         lineNum += 1
         if line[0:7] == "PUBLIC ":
-          line = line.rstrip("\n")
+          line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 4:
             LogTrace("Line " + str(lineNum) + " is messed")
@@ -118,7 +118,7 @@ class SymFileManager:
           symbolMap[address] = " ".join(fields[3:])
           publicCount += 1
         elif line[0:5] == "FUNC ":
-          line = line.rstrip("\n")
+          line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 5:
             LogTrace("Line " + str(lineNum) + " is messed")
