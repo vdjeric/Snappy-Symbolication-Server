@@ -11,6 +11,9 @@ import threading
 import json
 import re
 
+# Timeout (in seconds) for reading in a request from a client connection
+SOCKET_READ_TIMEOUT = 10.0
+
 # .SYM cache manager
 gSymFileManager = None
 
@@ -55,15 +58,26 @@ class RequestHandler(BaseHTTPRequestHandler):
     self.sendHeaders(200)
 
   def do_GET(self):
-    return self.do_POST(s)
+    return self.do_POST()
 
   def do_POST(self):
     LogTrace("Received request: " + self.path + " on thread " + threading.currentThread().getName())
 
     cleanRequestsArray = []
-    length = int(self.headers["Content-Length"])
     try:
+      length = int(self.headers["Content-Length"])
+      # Read in the request body without blocking
+      self.connection.settimeout(SOCKET_READ_TIMEOUT)
       requestBody = self.rfile.read(length)
+      # Put the connection back into blocking mode so rfile/wfile can be used safely
+      self.connection.settimeout(None)
+
+      if len(requestBody) < length:
+        # This could be a broken connection, writing an error message into it could be a bad idea
+        # See http://bugs.python.org/issue14574
+        LogTrace("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
+        return
+
       LogTrace("Request body: " + requestBody)
       rawRequestsArray = json.loads(requestBody)
 
@@ -79,6 +93,8 @@ class RequestHandler(BaseHTTPRequestHandler):
           return
     except Exception as e:
       LogTrace("Unable to parse request body: " + str(e))
+      # Ensure connection is back in blocking mode so rfile/wfile can be used safely
+      self.connection.settimeout(None)
       self.sendHeaders(400)
       return
 
