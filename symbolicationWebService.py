@@ -26,6 +26,8 @@ gOptions = {
   "firefoxSymbolsPath": os.getcwd() + os.sep + "symbols_ffx" + os.sep,
   # Location of Windows (and other) library symbols
   "osSymbolsPath": os.getcwd() + os.sep + "symbols_os" + os.sep,
+  # Fallback server if symbol is not found locally
+  "remoteSymbolServer": "",
   # Maximum number of symbol files to keep in memory
   # "maxCacheEntries": 10 * 1000 * 1000,
   "maxCacheEntries": 100,

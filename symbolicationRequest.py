@@ -2,12 +2,18 @@ from logging import LogTrace, LogError, LogMessage
 import symFileManager
 
 import re
+import json
+import urllib2
 from bisect import bisect
 
 # Precompiled regex for validating lib names
 gLibNameRE = re.compile("[0-9a-zA-Z_+\-\.]*$") # Empty lib name means client couldn't associate frame with any lib
 gPdbSigRE = re.compile("{([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{12})}$")
 gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
+
+# Maximum number of times a request can be forwarded to a different server
+# for symbolication. Also prevents loops.
+MAX_FORWARDED_REQUESTS = 3
 
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequest):
@@ -22,6 +28,7 @@ class SymbolicationRequest:
     self.stackPCs = []
     self.sortedModuleAddresses = []
     self.addressToModule = {}
+    self.forwardCount = 0
 
   def ParseRequest(self, rawRequest):
     global gLibNameRE, gPdbSigRE, gPdbSigRE2
@@ -100,18 +107,64 @@ class SymbolicationRequest:
 
         cleanMemoryMap.append([startAddress, libName, libSize, pdbAge, pdbSig, pdbName])
 
+      # Check if this request has been forwarded from another SymbolicationServer
+      if "forwarded" in rawRequest:
+        if not isinstance(rawRequest["forwarded"], (int, long)):
+          LogTrace("Invalid 'forwards' field: " + str(rawRequest["forwarded"]))
+          return
+        self.forwardCount = rawRequest["forwarded"]
+
       self.stackPCs = cleanStack
       self.memoryMap = cleanMemoryMap
 
     except Exception as e:
       LogTrace("Exception while parsing request: " + str(e))
-      return True
+      return
 
     self.isValidRequest = True
+
+  def ForwardRequest(self, indexes, stack, modules, symbolicatedStack):
+    LogTrace("Forwarding " + str(len(stack)) + " PCs for symbolication")
+
+    try:
+      url = self.symFileManager.sOptions["remoteSymbolServer"]
+      requestObj = [{ "stack": stack, "memoryMap": modules, "forwarded": self.forwardCount + 1 }]
+      requestJson = json.dumps(requestObj)
+      headers = { "Content-Type": "application/json" }
+      requestHandle = urllib2.Request(url, requestJson, headers)
+      response = urllib2.urlopen(requestHandle)
+    except Exception as e:
+      LogError("Exception while forwarding request: " + str(e))
+      return
+
+    try:
+      responseJson = response.read()
+    except Exception as e:
+      LogError("Exception while reading server response to forwarded request: " + str(e))
+      return
+
+    try:
+      responseSymbols = json.loads(responseJson)[0]
+      if len(responseSymbols) != len(stack):
+        LogError(str(len(responseSymbols)) + " symbols in response, " + str(len(stack)) + " PCs in request!")
+        return
+
+      for index in range(0, len(stack)):
+        symbol = responseSymbols[index]
+        originalIndex = indexes[index]
+        symbolicatedStack[originalIndex] = symbol
+    except Exception as e:
+      LogError("Exception while parsing server response to forwarded request: " + str(e))
+      return
 
   def Symbolicate(self, firstRequest):
     self.sortedModuleAddresses = []
     self.moduleAddressToMap = {}
+
+    # Check if we should forward requests when required sym files don't exist
+    shouldForwardRequests = False
+    if self.symFileManager.sOptions["remoteSymbolServer"] and self.forwardCount < MAX_FORWARDED_REQUESTS:
+      shouldForwardRequests = True
 
     # Build up structures for fast lookup of address -> module
     for module in self.memoryMap:
@@ -122,9 +175,15 @@ class SymbolicationRequest:
     self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
 
     # Symbolicate each PC
+    pcIndex = -1
     symbolicatedStack = []
     missingSymFiles = []
+    unresolvedIndexes = []
+    unresolvedStack = []
+    unresolvedModules = []
     for pc in self.stackPCs:
+      pcIndex += 1
+
       module = self.LookupModule(pc, firstRequest)
       if module == None:
         LogTrace("Couldn't find module for PC: " + str(pc))
@@ -134,8 +193,11 @@ class SymbolicationRequest:
       [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
 
 
+      # Don't look for a missing lib multiple times in one request
       if (pdbName, pdbSig, pdbAge) in missingSymFiles:
-        # Don't look for a missing lib multiple times in one request
+        if shouldForwardRequests:
+          unresolvedIndexes.append(pcIndex)
+          unresolvedStack.append(pc)
         symbolicatedStack.append("??? (in " + libName + ")")
         continue
 
@@ -144,11 +206,19 @@ class SymbolicationRequest:
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(pc - startAddress)
       else:
+        if shouldForwardRequests:
+          unresolvedIndexes.append(pcIndex)
+          unresolvedStack.append(pc)
+          unresolvedModules.append(module)
         missingSymFiles.append((pdbName, pdbSig, pdbAge))
 
       if functionName == None:
         functionName = "???"
       symbolicatedStack.append(functionName + " (in " + libName + ")")
+
+    # Ask another server for help symbolicating unresolved addresses
+    if len(unresolvedStack) > 0:
+      self.ForwardRequest(unresolvedIndexes, unresolvedStack, unresolvedModules, symbolicatedStack)
 
     return symbolicatedStack
 
