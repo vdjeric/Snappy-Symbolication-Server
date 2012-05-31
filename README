@@ -1,7 +1,16 @@
 OVERVIEW
 ===========
 
-The Hang Reporter is a new Firefox feature that reports transient main thread hangs to Telemetry. It is only useful on Windows builds from the Profiling branch because it relies on having Firefox compiled with frame pointers to unwind call stacks. The Hang Reporter functionality is #ifdef'd out on regular release builds. The expected users of this feature are developers running profiling builds. Some of the functionality is also used by the SPS profiler.
+The Snappy Symbolication Server is a Web server for symbolicating Firefox stacks. It matches PC addresses to modules in memory and looks up the corresponding function names in server-side symbol files (.SYM files).
+
+If you're interested in setting up local symbols for use with the Gecko profiler for Firefox, the following page will be useful to you:
+
+https://developer.mozilla.org/en/Performance/Profiling_with_the_Built-in_Profiler_and_Local_Symbols_on_Windows
+
+RELATIONSHIP TO FIREFOX HANG REPORTER FEATURE
+==============================================
+
+The Hang Reporter is a new Firefox feature that reports transient main thread hangs to Telemetry. It is only useful on Windows builds from the Profiling branch because it relies on having Firefox compiled with frame pointers to unwind call stacks. The Hang Reporter functionality is #ifdef'd out on regular release builds. The expected users of this feature are developers running profiling builds. The functionality is also used by the built-in Gecko profiler.
 
 The about:telemetry extension makes it possible to inspect the hang stacks locally. The about:telemetry extension will send the raw stacks to the Symbolication Server for server-side symbolication (using Socorro symbols) and then display the results within the about:telemetry page. This repo contains the code for the Symbolication Server.
 
@@ -11,16 +20,16 @@ BASICS
 2. Run the server with "python symbolicationWebService.py sample.conf"
 3. To stop the server send it a kill signal or Ctrl-C
 
-If you find the server is rejecting your symbolication requests, check the log (stdout/stderr) for clues. For less noisy logging, delete the "enableTrace" line from the configuration file.
+If you find the server is rejecting your symbolication requests, check the log (stdout/stderr) for clues. For more verbose logging, set the "enableTracing" setting to 1 in the configuration file.
 
 PROTOCOL
 ===========
 
 The symbolication requests are in JSON format. This is a minimal symbolication request:
 
-curl -d '[{"stack":["0x247E0"], "memoryMap":[[0, "mozjs.exe", 200000, 2, "3680D18BE79648BEB6FA92475B2636B9", "mozjs.pdb"]]}]' http://127.0.0.1:80/
+curl -d '[{"stack":["0x247E0"], "memoryMap":[[0, "mozjs.dll", 200000, 2, "E9DC73C71231454A80C1AB0D5B9B4C6F", "mozjs.pdb"]]}]' http://127.0.0.1:80/
 
-This is the corresponding response: [["JS::Value::isPrimitive() in mozjs.exe"]]
+This is the corresponding response: [["JS::Value::isPrimitive() in mozjs.dll"]]
 
 ---
 
