@@ -52,7 +52,7 @@ class SymbolicationRequest:
         if isinstance(pc, basestring):
           pc = int(pc, 16)
         if not isinstance(pc, (int, long)) or pc < 0:
-          LogTrace("Invalid stack address: " + str(pc))
+          LogTrace("Invalid stack address: " + hex(pc))
           return
         cleanStack.append(pc)
 
@@ -186,8 +186,8 @@ class SymbolicationRequest:
 
       module = self.LookupModule(pc, firstRequest)
       if module == None:
-        LogTrace("Couldn't find module for PC: " + str(pc))
-        symbolicatedStack.append("???")
+        LogTrace("Couldn't find module for PC: " + hex(pc))
+        symbolicatedStack.append(hex(pc))
         continue
 
       [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
@@ -198,7 +198,7 @@ class SymbolicationRequest:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(pc)
-        symbolicatedStack.append("??? (in " + libName + ")")
+        symbolicatedStack.append(hex(pc) + " (in " + libName + ")")
         continue
 
       functionName = None
@@ -213,7 +213,7 @@ class SymbolicationRequest:
         missingSymFiles.append((pdbName, pdbSig, pdbAge))
 
       if functionName == None:
-        functionName = "???"
+        functionName = hex(pc)
       symbolicatedStack.append(functionName + " (in " + libName + ")")
 
     # Ask another server for help symbolicating unresolved addresses
