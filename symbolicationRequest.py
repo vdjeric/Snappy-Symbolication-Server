@@ -15,7 +15,7 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-class ModuleIndex:
+class ModuleMap:
   def __init__(self, memoryMap):
     self.sortedModuleAddresses = []
     self.addressToModule = {}
@@ -51,7 +51,7 @@ class SymbolicationRequest:
     self.isValidRequest = False
     self.memoryMap = {}
     self.stackPCs = []
-    self.index = None
+    self.moduleMap = None
     self.forwardCount = 0
 
   def ParseRequest(self, rawRequest):
@@ -187,7 +187,7 @@ class SymbolicationRequest:
     if self.symFileManager.sOptions["remoteSymbolServer"] and self.forwardCount < MAX_FORWARDED_REQUESTS:
       shouldForwardRequests = True
 
-    self.index = ModuleIndex(self.memoryMap)
+    self.moduleMap = ModuleMap(self.memoryMap)
 
     # Symbolicate each PC
     pcIndex = -1
@@ -242,7 +242,7 @@ class SymbolicationRequest:
     for data in memoryMapsToConsult:
       if data == None:
         continue
-      r = data.index.LookupModule(pc)
+      r = data.moduleMap.LookupModule(pc)
       if r is not None:
         return r
 
