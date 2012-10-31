@@ -15,6 +15,31 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
+class ModuleIndex:
+  def __init__(self, memoryMap):
+    self.sortedModuleAddresses = []
+    self.addressToModule = {}
+    moduleIndex = 0
+    for module in memoryMap:
+      startAddress = module[0]
+      self.sortedModuleAddresses.append(startAddress)
+      self.addressToModule[startAddress] = (module, moduleIndex)
+      moduleIndex += 1
+    self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
+
+  def LookupModule(self, pc):
+    index = bisect(self.sortedModuleAddresses, pc) - 1
+    if index < 0:
+      return None
+
+    moduleStart = self.sortedModuleAddresses[index]
+    module, moduleIndex = self.addressToModule[moduleStart]
+    moduleEnd = moduleStart + module[2] - 1
+    if moduleStart <= pc and pc <= moduleEnd:
+      return module
+    else:
+      return None
+
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequest):
     self.Reset()
@@ -26,8 +51,7 @@ class SymbolicationRequest:
     self.isValidRequest = False
     self.memoryMap = {}
     self.stackPCs = []
-    self.sortedModuleAddresses = []
-    self.addressToModule = {}
+    self.index = None
     self.forwardCount = 0
 
   def ParseRequest(self, rawRequest):
@@ -158,21 +182,12 @@ class SymbolicationRequest:
       return
 
   def Symbolicate(self, firstRequest):
-    self.sortedModuleAddresses = []
-    self.moduleAddressToMap = {}
-
     # Check if we should forward requests when required sym files don't exist
     shouldForwardRequests = False
     if self.symFileManager.sOptions["remoteSymbolServer"] and self.forwardCount < MAX_FORWARDED_REQUESTS:
       shouldForwardRequests = True
 
-    # Build up structures for fast lookup of address -> module
-    for module in self.memoryMap:
-      startAddress = module[0]
-      self.sortedModuleAddresses.append(startAddress)
-      self.addressToModule[startAddress] = module
-
-    self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
+    self.index = ModuleIndex(self.memoryMap)
 
     # Symbolicate each PC
     pcIndex = -1
@@ -227,16 +242,8 @@ class SymbolicationRequest:
     for data in memoryMapsToConsult:
       if data == None:
         continue
-      index = bisect(data.sortedModuleAddresses, pc) - 1
-      if index >= 0:
-        # It's a hit, sanity check now
-        moduleStart = data.sortedModuleAddresses[index]
-        module = data.addressToModule[moduleStart]
-        moduleEnd = moduleStart + module[2] - 1
-        if moduleStart <= pc and pc <= moduleEnd:
-          return module
-        else:
-          #print "Bug or bad request!"
-          continue
+      r = data.index.LookupModule(pc)
+      if r is not None:
+        return r
 
     return None
