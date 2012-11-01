@@ -41,16 +41,26 @@ class ModuleMap:
       return None
 
 class SymbolicationRequest:
-  def __init__(self, symFileManager, rawRequest):
+  def __init__(self, symFileManager, rawRequests):
     self.Reset()
     self.symFileManager = symFileManager
-    self.ParseRequest(rawRequest)
+    self.stacks = []
+    self.memoryMaps = []
+    if len(rawRequests) == 0:
+      self.isValidRequest = False
+      return
+    for rawRequest in rawRequests:
+      self.isValidRequest = False
+      self.ParseRequest(rawRequest)
+      if not self.isValidRequest:
+        return
+    self.firstModuleMap = ModuleMap(self.memoryMaps[0])
 
   def Reset(self):
     self.symFileManager = None
     self.isValidRequest = False
-    self.memoryMap = {}
-    self.stackPCs = []
+    self.memoryMaps = []
+    self.stacks = []
     self.moduleMap = None
     self.forwardCount = 0
 
@@ -138,8 +148,8 @@ class SymbolicationRequest:
           return
         self.forwardCount = rawRequest["forwarded"]
 
-      self.stackPCs = cleanStack
-      self.memoryMap = cleanMemoryMap
+      self.stacks.append(cleanStack)
+      self.memoryMaps.append(cleanMemoryMap)
 
     except Exception as e:
       LogTrace("Exception while parsing request: " + str(e))
@@ -181,13 +191,11 @@ class SymbolicationRequest:
       LogError("Exception while parsing server response to forwarded request: " + str(e))
       return
 
-  def Symbolicate(self, firstRequest):
+  def Symbolicate(self, stackNum):
     # Check if we should forward requests when required sym files don't exist
     shouldForwardRequests = False
     if self.symFileManager.sOptions["remoteSymbolServer"] and self.forwardCount < MAX_FORWARDED_REQUESTS:
       shouldForwardRequests = True
-
-    self.moduleMap = ModuleMap(self.memoryMap)
 
     # Symbolicate each PC
     pcIndex = -1
@@ -196,10 +204,15 @@ class SymbolicationRequest:
     unresolvedIndexes = []
     unresolvedStack = []
     unresolvedModules = []
-    for pc in self.stackPCs:
+    stack = self.stacks[stackNum]
+    curModuleMap = None
+    if stackNum != 0:
+      curModuleMap = ModuleMap(self.memoryMaps[stackNum])
+
+    for pc in stack:
       pcIndex += 1
 
-      module = self.LookupModule(pc, firstRequest)
+      module = self.LookupModule(pc, curModuleMap)
       if module == None:
         LogTrace("Couldn't find module for PC: " + hex(pc))
         symbolicatedStack.append(hex(pc))
@@ -237,12 +250,12 @@ class SymbolicationRequest:
 
     return symbolicatedStack
 
-  def LookupModule(self, pc, firstRequest):
-    memoryMapsToConsult = [self, firstRequest]
+  def LookupModule(self, pc, curModuleMap):
+    memoryMapsToConsult = [curModuleMap, self.firstModuleMap]
     for data in memoryMapsToConsult:
       if data == None:
         continue
-      r = data.moduleMap.LookupModule(pc)
+      r = data.LookupModule(pc)
       if r is not None:
         return r
 
