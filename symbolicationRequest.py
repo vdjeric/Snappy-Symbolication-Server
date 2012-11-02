@@ -15,15 +15,67 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
+class Module:
+  def __init__(self, startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+    self.libName = libName
+    self.pdbAge = pdbAge
+    self.pdbSig = pdbSig
+    self.pdbName = pdbName
+    self.startAddress = startAddress
+    self.libSize = libSize
+
+def getModule(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+  if isinstance(startAddress, basestring):
+    startAddress = int(startAddress, 16)
+  if not isinstance(startAddress, (int, long)) or startAddress < 0:
+    LogTrace("Bad start address format: " + str(startAddress))
+    return None
+
+  if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
+    LogTrace("Bad library name: " + str(libName))
+    return None
+
+  if isinstance(pdbSig, basestring):
+    matches = gPdbSigRE.match(pdbSig)
+    if matches:
+      pdbSig = "".join(matches.groups()).upper()
+    elif gPdbSigRE2.match(pdbSig):
+      pdbSig = pdbSig.upper()
+    else:
+      LogTrace("Bad PDB signature: " + pdbSig)
+      return None
+  else:
+    LogTrace("Bad PDB signature: " + str(pdbSig))
+    return None
+
+  if isinstance(libSize, basestring):
+    libSize = int(libSize)
+  if not isinstance(libSize, (int, long)) or int(libSize) < 0:
+    LogTrace("Bad PDB size: " + str(libSize))
+    return None
+
+  if isinstance(pdbAge, basestring):
+    pdbAge = int(pdbAge)
+  if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
+    LogTrace("Bad PDB age: " + str(pdbAge))
+    return None
+  pdbAge = (hex(pdbAge)[2:]).lower()
+
+  if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
+    LogTrace("Bad PDB name: " + str(pdbName))
+    return None
+
+  return Module(startAddress, libName, libSize, pdbAge, pdbSig, pdbName)
+
 class ModuleMap:
   def __init__(self, memoryMap):
     self.sortedModuleAddresses = []
     self.addressToModule = {}
     moduleIndex = 0
     for module in memoryMap:
-      startAddress = module[0]
+      startAddress = module.startAddress
       self.sortedModuleAddresses.append(startAddress)
-      self.addressToModule[startAddress] = (module, moduleIndex)
+      self.addressToModule[startAddress] = module
       moduleIndex += 1
     self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
 
@@ -33,12 +85,11 @@ class ModuleMap:
       return None
 
     moduleStart = self.sortedModuleAddresses[index]
-    module, moduleIndex = self.addressToModule[moduleStart]
-    moduleEnd = moduleStart + module[2] - 1
+    module = self.addressToModule[moduleStart]
+    moduleEnd = moduleStart + module.libSize - 1
     if moduleStart <= pc and pc <= moduleEnd:
       return module
-    else:
-      return None
+    return None
 
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequests):
@@ -92,54 +143,16 @@ class SymbolicationRequest:
 
       # Check memory map is well-formatted
       cleanMemoryMap = []
-      for module in rawRequest["memoryMap"]:
-        if not isinstance(module, list) or len(module) != 6:
-          LogTrace("Entry in memory map is not a 6 item list: " + str(module))
+      for rawModule in rawRequest["memoryMap"]:
+        if not isinstance(rawModule, list) or len(rawModule) != 6:
+          LogTrace("Entry in memory map is not a 6 item list: %s" % rawModule)
+          return
+        
+        module = getModule(*rawModule)
+        if module is None:
           return
 
-        [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
-
-        if isinstance(startAddress, basestring):
-          startAddress = int(startAddress, 16)
-        if not isinstance(startAddress, (int, long)) or startAddress < 0:
-          LogTrace("Bad start address format: " + str(startAddress))
-          return
-
-        if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
-          LogTrace("Bad library name: " + str(libName))
-          return
-
-        if isinstance(pdbSig, basestring):
-          matches = gPdbSigRE.match(pdbSig)
-          if matches:
-            pdbSig = "".join(matches.groups()).upper()
-          elif gPdbSigRE2.match(pdbSig):
-            pdbSig = pdbSig.upper()
-          else:
-            LogTrace("Bad PDB signature: " + pdbSig)
-            return
-        else:
-          LogTrace("Bad PDB signature: " + str(pdbSig))
-          return
-
-        if isinstance(libSize, basestring):
-          libSize = int(libSize)
-        if not isinstance(libSize, (int, long)) or int(libSize) < 0:
-          LogTrace("Bad PDB size: " + str(libSize))
-          return
-
-        if isinstance(pdbAge, basestring):
-          pdbAge = int(pdbAge)
-        if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
-          LogTrace("Bad PDB age: " + str(pdbAge))
-          return
-        pdbAge = (hex(pdbAge)[2:]).lower()
-
-        if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
-          LogTrace("Bad PDB name: " + str(pdbName))
-          return
-
-        cleanMemoryMap.append([startAddress, libName, libSize, pdbAge, pdbSig, pdbName])
+        cleanMemoryMap.append(module)
 
       # Check if this request has been forwarded from another SymbolicationServer
       if "forwarded" in rawRequest:
@@ -162,7 +175,11 @@ class SymbolicationRequest:
 
     try:
       url = self.symFileManager.sOptions["remoteSymbolServer"]
-      requestObj = [{ "stack": stack, "memoryMap": modules, "forwarded": self.forwardCount + 1 }]
+      rawModules =  []
+      for m in modules:
+        l = [m.startAddress, m.libName, m.libSize, m.pdbAge, m.pdbSig, m.pdbName]
+        rawModules.append(l)
+      requestObj = [{ "stack": stack, "memoryMap": rawModules, "forwarded": self.forwardCount + 1 }]
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
@@ -218,31 +235,30 @@ class SymbolicationRequest:
         symbolicatedStack.append(hex(pc))
         continue
 
-      [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
-
-
       # Don't look for a missing lib multiple times in one request
-      if (pdbName, pdbSig, pdbAge) in missingSymFiles:
+      if (module.pdbName, module.pdbSig, module.pdbAge) in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(pc)
-        symbolicatedStack.append(hex(pc) + " (in " + libName + ")")
+        symbolicatedStack.append(hex(pc) + " (in " + module.libName + ")")
         continue
 
       functionName = None
-      libSymbolMap = self.symFileManager.GetLibSymbolMap(pdbName, pdbSig, pdbAge)
+      libSymbolMap = self.symFileManager.GetLibSymbolMap(module.pdbName,
+                                                         module.pdbSig,
+                                                         module.pdbAge)
       if libSymbolMap:
-        functionName = libSymbolMap.Lookup(pc - startAddress)
+        functionName = libSymbolMap.Lookup(pc - module.startAddress)
       else:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(pc)
           unresolvedModules.append(module)
-        missingSymFiles.append((pdbName, pdbSig, pdbAge))
+        missingSymFiles.append((module.pdbName, module.pdbSig, module.pdbAge))
 
       if functionName == None:
         functionName = hex(pc)
-      symbolicatedStack.append(functionName + " (in " + libName + ")")
+      symbolicatedStack.append(functionName + " (in " + module.libName + ")")
 
     # Ask another server for help symbolicating unresolved addresses
     if len(unresolvedStack) > 0:
