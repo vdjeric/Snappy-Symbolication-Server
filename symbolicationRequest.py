@@ -15,15 +15,67 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
+class Module:
+  def __init__(self, startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+    self.libName = libName
+    self.pdbAge = pdbAge
+    self.pdbSig = pdbSig
+    self.pdbName = pdbName
+    self.startAddress = startAddress
+    self.libSize = libSize
+
+def getModule(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+  if isinstance(startAddress, basestring):
+    startAddress = int(startAddress, 16)
+  if not isinstance(startAddress, (int, long)) or startAddress < 0:
+    LogTrace("Bad start address format: " + str(startAddress))
+    return None
+
+  if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
+    LogTrace("Bad library name: " + str(libName))
+    return None
+
+  if isinstance(pdbSig, basestring):
+    matches = gPdbSigRE.match(pdbSig)
+    if matches:
+      pdbSig = "".join(matches.groups()).upper()
+    elif gPdbSigRE2.match(pdbSig):
+      pdbSig = pdbSig.upper()
+    else:
+      LogTrace("Bad PDB signature: " + pdbSig)
+      return None
+  else:
+    LogTrace("Bad PDB signature: " + str(pdbSig))
+    return None
+
+  if isinstance(libSize, basestring):
+    libSize = int(libSize)
+  if not isinstance(libSize, (int, long)) or int(libSize) < 0:
+    LogTrace("Bad PDB size: " + str(libSize))
+    return None
+
+  if isinstance(pdbAge, basestring):
+    pdbAge = int(pdbAge)
+  if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
+    LogTrace("Bad PDB age: " + str(pdbAge))
+    return None
+  pdbAge = (hex(pdbAge)[2:]).lower()
+
+  if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
+    LogTrace("Bad PDB name: " + str(pdbName))
+    return None
+
+  return Module(startAddress, libName, libSize, pdbAge, pdbSig, pdbName)
+
 class ModuleMap:
   def __init__(self, memoryMap):
     self.sortedModuleAddresses = []
     self.addressToModule = {}
     moduleIndex = 0
     for module in memoryMap:
-      startAddress = module[0]
+      startAddress = module.startAddress
       self.sortedModuleAddresses.append(startAddress)
-      self.addressToModule[startAddress] = (module, moduleIndex)
+      self.addressToModule[startAddress] = module
       moduleIndex += 1
     self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
 
@@ -33,24 +85,33 @@ class ModuleMap:
       return None
 
     moduleStart = self.sortedModuleAddresses[index]
-    module, moduleIndex = self.addressToModule[moduleStart]
-    moduleEnd = moduleStart + module[2] - 1
+    module = self.addressToModule[moduleStart]
+    moduleEnd = moduleStart + module.libSize - 1
     if moduleStart <= pc and pc <= moduleEnd:
       return module
-    else:
-      return None
+    return None
 
 class SymbolicationRequest:
-  def __init__(self, symFileManager, rawRequest):
+  def __init__(self, symFileManager, rawRequests):
     self.Reset()
     self.symFileManager = symFileManager
-    self.ParseRequest(rawRequest)
+    self.stacks = []
+    self.memoryMaps = []
+    if len(rawRequests) == 0:
+      self.isValidRequest = False
+      return
+    for rawRequest in rawRequests:
+      self.isValidRequest = False
+      self.ParseRequest(rawRequest)
+      if not self.isValidRequest:
+        return
+    self.firstModuleMap = ModuleMap(self.memoryMaps[0])
 
   def Reset(self):
     self.symFileManager = None
     self.isValidRequest = False
-    self.memoryMap = {}
-    self.stackPCs = []
+    self.memoryMaps = []
+    self.stacks = []
     self.moduleMap = None
     self.forwardCount = 0
 
@@ -82,54 +143,16 @@ class SymbolicationRequest:
 
       # Check memory map is well-formatted
       cleanMemoryMap = []
-      for module in rawRequest["memoryMap"]:
-        if not isinstance(module, list) or len(module) != 6:
-          LogTrace("Entry in memory map is not a 6 item list: " + str(module))
+      for rawModule in rawRequest["memoryMap"]:
+        if not isinstance(rawModule, list) or len(rawModule) != 6:
+          LogTrace("Entry in memory map is not a 6 item list: %s" % rawModule)
+          return
+        
+        module = getModule(*rawModule)
+        if module is None:
           return
 
-        [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
-
-        if isinstance(startAddress, basestring):
-          startAddress = int(startAddress, 16)
-        if not isinstance(startAddress, (int, long)) or startAddress < 0:
-          LogTrace("Bad start address format: " + str(startAddress))
-          return
-
-        if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
-          LogTrace("Bad library name: " + str(libName))
-          return
-
-        if isinstance(pdbSig, basestring):
-          matches = gPdbSigRE.match(pdbSig)
-          if matches:
-            pdbSig = "".join(matches.groups()).upper()
-          elif gPdbSigRE2.match(pdbSig):
-            pdbSig = pdbSig.upper()
-          else:
-            LogTrace("Bad PDB signature: " + pdbSig)
-            return
-        else:
-          LogTrace("Bad PDB signature: " + str(pdbSig))
-          return
-
-        if isinstance(libSize, basestring):
-          libSize = int(libSize)
-        if not isinstance(libSize, (int, long)) or int(libSize) < 0:
-          LogTrace("Bad PDB size: " + str(libSize))
-          return
-
-        if isinstance(pdbAge, basestring):
-          pdbAge = int(pdbAge)
-        if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
-          LogTrace("Bad PDB age: " + str(pdbAge))
-          return
-        pdbAge = (hex(pdbAge)[2:]).lower()
-
-        if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
-          LogTrace("Bad PDB name: " + str(pdbName))
-          return
-
-        cleanMemoryMap.append([startAddress, libName, libSize, pdbAge, pdbSig, pdbName])
+        cleanMemoryMap.append(module)
 
       # Check if this request has been forwarded from another SymbolicationServer
       if "forwarded" in rawRequest:
@@ -138,8 +161,8 @@ class SymbolicationRequest:
           return
         self.forwardCount = rawRequest["forwarded"]
 
-      self.stackPCs = cleanStack
-      self.memoryMap = cleanMemoryMap
+      self.stacks.append(cleanStack)
+      self.memoryMaps.append(cleanMemoryMap)
 
     except Exception as e:
       LogTrace("Exception while parsing request: " + str(e))
@@ -152,7 +175,11 @@ class SymbolicationRequest:
 
     try:
       url = self.symFileManager.sOptions["remoteSymbolServer"]
-      requestObj = [{ "stack": stack, "memoryMap": modules, "forwarded": self.forwardCount + 1 }]
+      rawModules =  []
+      for m in modules:
+        l = [m.startAddress, m.libName, m.libSize, m.pdbAge, m.pdbSig, m.pdbName]
+        rawModules.append(l)
+      requestObj = [{ "stack": stack, "memoryMap": rawModules, "forwarded": self.forwardCount + 1 }]
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
@@ -181,13 +208,11 @@ class SymbolicationRequest:
       LogError("Exception while parsing server response to forwarded request: " + str(e))
       return
 
-  def Symbolicate(self, firstRequest):
+  def Symbolicate(self, stackNum):
     # Check if we should forward requests when required sym files don't exist
     shouldForwardRequests = False
     if self.symFileManager.sOptions["remoteSymbolServer"] and self.forwardCount < MAX_FORWARDED_REQUESTS:
       shouldForwardRequests = True
-
-    self.moduleMap = ModuleMap(self.memoryMap)
 
     # Symbolicate each PC
     pcIndex = -1
@@ -196,40 +221,44 @@ class SymbolicationRequest:
     unresolvedIndexes = []
     unresolvedStack = []
     unresolvedModules = []
-    for pc in self.stackPCs:
+    stack = self.stacks[stackNum]
+    curModuleMap = None
+    if stackNum != 0:
+      curModuleMap = ModuleMap(self.memoryMaps[stackNum])
+
+    for pc in stack:
       pcIndex += 1
 
-      module = self.LookupModule(pc, firstRequest)
+      module = self.LookupModule(pc, curModuleMap)
       if module == None:
         LogTrace("Couldn't find module for PC: " + hex(pc))
         symbolicatedStack.append(hex(pc))
         continue
 
-      [startAddress, libName, libSize, pdbAge, pdbSig, pdbName] = module
-
-
       # Don't look for a missing lib multiple times in one request
-      if (pdbName, pdbSig, pdbAge) in missingSymFiles:
+      if (module.pdbName, module.pdbSig, module.pdbAge) in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(pc)
-        symbolicatedStack.append(hex(pc) + " (in " + libName + ")")
+        symbolicatedStack.append(hex(pc) + " (in " + module.libName + ")")
         continue
 
       functionName = None
-      libSymbolMap = self.symFileManager.GetLibSymbolMap(pdbName, pdbSig, pdbAge)
+      libSymbolMap = self.symFileManager.GetLibSymbolMap(module.pdbName,
+                                                         module.pdbSig,
+                                                         module.pdbAge)
       if libSymbolMap:
-        functionName = libSymbolMap.Lookup(pc - startAddress)
+        functionName = libSymbolMap.Lookup(pc - module.startAddress)
       else:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(pc)
           unresolvedModules.append(module)
-        missingSymFiles.append((pdbName, pdbSig, pdbAge))
+        missingSymFiles.append((module.pdbName, module.pdbSig, module.pdbAge))
 
       if functionName == None:
         functionName = hex(pc)
-      symbolicatedStack.append(functionName + " (in " + libName + ")")
+      symbolicatedStack.append(functionName + " (in " + module.libName + ")")
 
     # Ask another server for help symbolicating unresolved addresses
     if len(unresolvedStack) > 0:
@@ -237,12 +266,12 @@ class SymbolicationRequest:
 
     return symbolicatedStack
 
-  def LookupModule(self, pc, firstRequest):
-    memoryMapsToConsult = [self, firstRequest]
+  def LookupModule(self, pc, curModuleMap):
+    memoryMapsToConsult = [curModuleMap, self.firstModuleMap]
     for data in memoryMapsToConsult:
       if data == None:
         continue
-      r = data.moduleMap.LookupModule(pc)
+      r = data.LookupModule(pc)
       if r is not None:
         return r
 

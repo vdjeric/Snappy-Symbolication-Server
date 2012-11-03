@@ -65,7 +65,6 @@ class RequestHandler(BaseHTTPRequestHandler):
   def do_POST(self):
     LogTrace("Received request: " + self.path + " on thread " + threading.currentThread().getName())
 
-    cleanRequestsArray = []
     try:
       length = int(self.headers["Content-Length"])
       # Read in the request body without blocking
@@ -81,18 +80,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         return
 
       LogTrace("Request body: " + requestBody)
-      rawRequestsArray = json.loads(requestBody)
+      rawRequest = json.loads(requestBody)
 
-      requestNumber = 0
-      for rawRequest in rawRequestsArray:
-        requestNumber += 1
-        request = SymbolicationRequest(gSymFileManager, rawRequest)
-        if request.isValidRequest:
-          cleanRequestsArray.append(request)
-        else:
-          LogTrace("Unable to parse request #" + str(requestNumber))
-          self.sendHeaders(400)
-          return
+      request = SymbolicationRequest(gSymFileManager, rawRequest)
+      if not request.isValidRequest:
+        LogTrace("Unable to parse request")
+        self.sendHeaders(400)
+        return
     except Exception as e:
       LogTrace("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
@@ -104,17 +98,15 @@ class RequestHandler(BaseHTTPRequestHandler):
       self.sendHeaders(200)
 
       response = []
-      for request in cleanRequestsArray:
-        if len(response) == 0:
-          # If this is the first request, only look at its own memory map
-          symbolicatedStack = request.Symbolicate(None)
-        else:
-          # Memory maps are relative to first map in report
-          symbolicatedStack = request.Symbolicate(cleanRequestsArray[0])
-          # Free up memory ASAP
-          request.Reset()
+      for stackIndex in range(len(request.stacks)):
+        symbolicatedStack = request.Symbolicate(stackIndex)
+
+        # Free up memory ASAP
+        request.stacks[stackIndex] = []
+        request.memoryMaps[stackIndex] = []
 
         response.append(symbolicatedStack)
+      request.Reset()
 
       LogTrace("Response: " + json.dumps(response))
       self.wfile.write(json.dumps(response))
