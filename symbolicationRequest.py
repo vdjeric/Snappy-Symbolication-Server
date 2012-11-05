@@ -107,15 +107,7 @@ class SymbolicationRequest:
     self.symFileManager = symFileManager
     self.stacks = []
     self.memoryMaps = []
-    if len(rawRequests) == 0:
-      self.isValidRequest = False
-      return
-    for rawRequest in rawRequests:
-      self.isValidRequest = False
-      self.ParseRequest(rawRequest)
-      if not self.isValidRequest:
-        return
-    self.firstModuleMap = ModuleMap(self.memoryMaps[0])
+    self.ParseRequests(rawRequests)
 
   def Reset(self):
     self.symFileManager = None
@@ -125,7 +117,32 @@ class SymbolicationRequest:
     self.moduleMap = None
     self.forwardCount = 0
 
-  def ParseRequest(self, rawRequest):
+  def ParseRequests(self, rawRequests):
+    self.isValidRequest = False
+    if isinstance(rawRequests, dict):
+      self.ParseRequestsV2(rawRequests)
+      return
+    self.ParseRequestsV1(rawRequests)
+
+  def ParseRequestsV2(self, rawRequests):
+    return
+
+  def ParseRequestsV1(self, rawRequests):
+    if not isinstance(rawRequests, list):
+      LogTrace("rawRequests is not a list")
+      return
+
+    if len(rawRequests) == 0:
+      return
+
+    for rawRequest in rawRequests:
+      self.isValidRequest = False
+      self.ParseRequestV1(rawRequest)
+      if not self.isValidRequest:
+        return
+    self.firstModuleMap = ModuleMap(self.memoryMaps[0])
+
+  def ParseRequestV1(self, rawRequest):
     try:
       # Parse to confirm valid format before doing any processing
       if not isinstance(rawRequest, dict):
