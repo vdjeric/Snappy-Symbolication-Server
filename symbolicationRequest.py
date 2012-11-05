@@ -116,7 +116,6 @@ class SymbolicationRequest:
     self.forwardCount = 0
 
   def ParseRequest(self, rawRequest):
-    global gLibNameRE, gPdbSigRE, gPdbSigRE2
     try:
       # Parse to confirm valid format before doing any processing
       if not isinstance(rawRequest, dict):
