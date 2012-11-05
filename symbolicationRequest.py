@@ -15,22 +15,20 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-class Module:
-  def __init__(self, startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+class ModuleV2:
+  def __init__(self, libName, pdbAge, pdbSig, pdbName):
     self.libName = libName
     self.pdbAge = pdbAge
     self.pdbSig = pdbSig
     self.pdbName = pdbName
+
+class ModuleV1(ModuleV2):
+  def __init__(self, startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+    ModuleV2.__init__(self, libName, pdbAge, pdbSig, pdbName)
     self.startAddress = startAddress
     self.libSize = libSize
 
-def getModule(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
-  if isinstance(startAddress, basestring):
-    startAddress = int(startAddress, 16)
-  if not isinstance(startAddress, (int, long)) or startAddress < 0:
-    LogTrace("Bad start address format: " + str(startAddress))
-    return None
-
+def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
     LogTrace("Bad library name: " + str(libName))
     return None
@@ -48,12 +46,6 @@ def getModule(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
     LogTrace("Bad PDB signature: " + str(pdbSig))
     return None
 
-  if isinstance(libSize, basestring):
-    libSize = int(libSize)
-  if not isinstance(libSize, (int, long)) or int(libSize) < 0:
-    LogTrace("Bad PDB size: " + str(libSize))
-    return None
-
   if isinstance(pdbAge, basestring):
     pdbAge = int(pdbAge)
   if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
@@ -64,8 +56,26 @@ def getModule(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
   if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
     LogTrace("Bad PDB name: " + str(pdbName))
     return None
+  return ModuleV2(libName, pdbAge, pdbSig, pdbName)
 
-  return Module(startAddress, libName, libSize, pdbAge, pdbSig, pdbName)
+def getModuleV1(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
+  if isinstance(startAddress, basestring):
+    startAddress = int(startAddress, 16)
+  if not isinstance(startAddress, (int, long)) or startAddress < 0:
+    LogTrace("Bad start address format: " + str(startAddress))
+    return None
+
+  if isinstance(libSize, basestring):
+    libSize = int(libSize)
+  if not isinstance(libSize, (int, long)) or int(libSize) < 0:
+    LogTrace("Bad PDB size: " + str(libSize))
+    return None
+
+  v2 = getModuleV2(libName, pdbAge, pdbSig, pdbName)
+  if v2 is None:
+    return None
+  return ModuleV1(startAddress, v2.libName, libSize, v2.pdbAge, v2.pdbSig,
+	 v2.pdbName)
 
 class ModuleMap:
   def __init__(self, memoryMap):
@@ -147,7 +157,7 @@ class SymbolicationRequest:
           LogTrace("Entry in memory map is not a 6 item list: %s" % rawModule)
           return
         
-        module = getModule(*rawModule)
+        module = getModuleV1(*rawModule)
         if module is None:
           return
 
