@@ -80,26 +80,28 @@ def getModuleV1(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
 class ModuleMap:
   def __init__(self, memoryMap):
     self.sortedModuleAddresses = []
-    self.addressToModule = {}
+    self.addressToModuleIndex = {}
+    self.memoryMap = memoryMap
     moduleIndex = 0
     for module in memoryMap:
       startAddress = module.startAddress
       self.sortedModuleAddresses.append(startAddress)
-      self.addressToModule[startAddress] = module
+      self.addressToModuleIndex[startAddress] = moduleIndex
       moduleIndex += 1
     self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
 
-  def LookupModule(self, pc):
+  def LookupModuleIndex(self, pc):
     index = bisect(self.sortedModuleAddresses, pc) - 1
     if index < 0:
-      return None
+      return -1
 
     moduleStart = self.sortedModuleAddresses[index]
-    module = self.addressToModule[moduleStart]
+    moduleIndex = self.addressToModuleIndex[moduleStart]
+    module = self.memoryMap[moduleIndex]
     moduleEnd = moduleStart + module.libSize - 1
     if moduleStart <= pc and pc <= moduleEnd:
-      return module
-    return None
+      return moduleIndex
+    return -1
 
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequests):
@@ -141,6 +143,7 @@ class SymbolicationRequest:
       if not self.isValidRequest:
         return
     self.firstModuleMap = ModuleMap(self.memoryMaps[0])
+    self.memoryMaps[0] = None
 
   def ParseRequestV1(self, rawRequest):
     try:
@@ -251,6 +254,7 @@ class SymbolicationRequest:
     curModuleMap = None
     if stackNum != 0:
       curModuleMap = ModuleMap(self.memoryMaps[stackNum])
+      self.memoryMaps[stackNum] = None
 
     for pc in stack:
       pcIndex += 1
@@ -297,8 +301,8 @@ class SymbolicationRequest:
     for data in memoryMapsToConsult:
       if data == None:
         continue
-      r = data.LookupModule(pc)
-      if r is not None:
-        return r
+      r = data.LookupModuleIndex(pc)
+      if r != -1:
+        return data.memoryMap[r]
 
     return None

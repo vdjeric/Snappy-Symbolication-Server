@@ -103,7 +103,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         # Free up memory ASAP
         request.stacks[stackIndex] = []
-        request.memoryMaps[stackIndex] = []
 
         response.append(symbolicatedStack)
       request.Reset()
