@@ -142,8 +142,27 @@ class SymbolicationRequest:
       self.ParseRequestV1(rawRequest)
       if not self.isValidRequest:
         return
-    self.firstModuleMap = ModuleMap(self.memoryMaps[0])
-    self.memoryMaps[0] = None
+    firstModuleMap = ModuleMap(self.memoryMaps[0])
+    self.combinedMemoryMap = []
+    for stackNum in range(len(self.stacks)):
+      stack = self.stacks[stackNum]
+      oldLength = len(self.combinedMemoryMap)
+      self.combinedMemoryMap.extend(self.memoryMaps[stackNum])
+      curModuleMap = None
+      if stackNum != 0:
+        curModuleMap = ModuleMap(self.memoryMaps[stackNum])
+      self.memoryMaps[stackNum] = None
+      newStack = []
+      for pc in stack:
+        moduleIndex = self.LookupModuleIndex(pc, curModuleMap, firstModuleMap,
+                                             oldLength)
+        if moduleIndex == -1:
+          LogTrace("Couldn't find module for PC: " + hex(pc))
+          newStack.append((moduleIndex, pc))
+          continue
+        module = self.combinedMemoryMap[moduleIndex]
+        newStack.append((moduleIndex, pc - module.startAddress))
+      self.stacks[stackNum] = newStack
 
   def ParseRequestV1(self, rawRequest):
     try:
@@ -252,18 +271,16 @@ class SymbolicationRequest:
     unresolvedModules = []
     stack = self.stacks[stackNum]
     curModuleMap = None
-    if stackNum != 0:
-      curModuleMap = ModuleMap(self.memoryMaps[stackNum])
-      self.memoryMaps[stackNum] = None
 
-    for pc in stack:
+    for entry in stack:
       pcIndex += 1
-
-      module = self.LookupModule(pc, curModuleMap)
-      if module == None:
-        LogTrace("Couldn't find module for PC: " + hex(pc))
-        symbolicatedStack.append(hex(pc))
+      moduleIndex = entry[0]
+      offset = entry[1]
+      if moduleIndex == -1:
+        symbolicatedStack.append(hex(offset))
         continue
+      module = self.combinedMemoryMap[moduleIndex]
+      pc = offset + module.startAddress
 
       # Don't look for a missing lib multiple times in one request
       if (module.pdbName, module.pdbSig, module.pdbAge) in missingSymFiles:
@@ -278,7 +295,7 @@ class SymbolicationRequest:
                                                          module.pdbSig,
                                                          module.pdbAge)
       if libSymbolMap:
-        functionName = libSymbolMap.Lookup(pc - module.startAddress)
+        functionName = libSymbolMap.Lookup(offset)
       else:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
@@ -296,13 +313,15 @@ class SymbolicationRequest:
 
     return symbolicatedStack
 
-  def LookupModule(self, pc, curModuleMap):
-    memoryMapsToConsult = [curModuleMap, self.firstModuleMap]
-    for data in memoryMapsToConsult:
+  def LookupModuleIndex(self, pc, curModuleMap, firstModuleMap, diff):
+    memoryMapsToConsult = [curModuleMap, firstModuleMap]
+    for dataIndex in range(len(memoryMapsToConsult)):
+      data = memoryMapsToConsult[dataIndex]
       if data == None:
         continue
       r = data.LookupModuleIndex(pc)
       if r != -1:
-        return data.memoryMap[r]
-
-    return None
+        if dataIndex == 0:
+          return r + diff
+        return r
+    return -1
