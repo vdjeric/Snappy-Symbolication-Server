@@ -127,7 +127,66 @@ class SymbolicationRequest:
     self.ParseRequestsV1(rawRequests)
 
   def ParseRequestsV2(self, rawRequests):
-    return
+    try:
+      if "version" not in rawRequests:
+        LogTrace("Request is missing 'version' field")
+        return
+      version = rawRequests["version"]
+      if version != 2:
+        LogTrace("Invalid version: %s" % version)
+        return
+
+      if "memoryMap" not in rawRequests:
+        LogTrace("Request is missing 'memoryMap' field")
+        return
+      memoryMap = rawRequests["memoryMap"]
+      if not isinstance(memoryMap, list):
+        LogTrace("'memoryMap' field in request is not a list")
+
+      if "stacks" not in rawRequests:
+        LogTrace("Request is missing 'stacks' field")
+        return
+      stacks = rawRequests["stacks"]
+      if not isinstance(stacks, list):
+        LogTrace("'stacks' field in request is not a list")
+        return
+
+      # Check memory map is well-formatted
+      cleanMemoryMap = []
+      for module in memoryMap:
+        if not isinstance(module, list):
+          LogTrace("Entry in memory map is not a list: " + str(module))
+          return
+
+        if len(module) != 4:
+          LogTrace("Entry in memory map is not a 4 item list: " + str(module))
+          return
+
+        module = getModuleV2(*module)
+        cleanMemoryMap.append(module)
+
+      self.combinedMemoryMap = cleanMemoryMap
+
+      # Check stack is well-formatted
+      for stack in stacks:
+        if not isinstance(stack, list):
+          LogTrace("stack is not a list")
+          return
+        for entry in stack:
+          if not isinstance(entry, list):
+            LogTrace("stack entry is not a list")
+            return
+          if len(entry) != 2:
+            LogTrace("stack entry doesn't have exactly 2 elements")
+            return
+
+        self.stacks.append(stack)
+
+    except Exception as e:
+      LogTrace("Exception while parsing request: " + str(e))
+      return
+
+    self.isValidRequest = True
 
   def ParseRequestsV1(self, rawRequests):
     if not isinstance(rawRequests, list):
@@ -142,6 +201,7 @@ class SymbolicationRequest:
       self.ParseRequestV1(rawRequest)
       if not self.isValidRequest:
         return
+
     firstModuleMap = ModuleMap(self.memoryMaps[0])
     self.combinedMemoryMap = []
     for stackNum in range(len(self.stacks)):
@@ -163,6 +223,11 @@ class SymbolicationRequest:
         module = self.combinedMemoryMap[moduleIndex]
         newStack.append((moduleIndex, pc - module.startAddress))
       self.stacks[stackNum] = newStack
+
+    for moduleIndex in range(len(self.combinedMemoryMap)):
+      old = self.combinedMemoryMap[moduleIndex]
+      new = ModuleV2(old.libName, old.pdbAge, old.pdbSig, old.pdbName)
+      self.combinedMemoryMap[moduleIndex] = new
 
   def ParseRequestV1(self, rawRequest):
     try:
@@ -222,12 +287,41 @@ class SymbolicationRequest:
     LogTrace("Forwarding " + str(len(stack)) + " PCs for symbolication")
 
     try:
+      # find the maximum offset in each module
+      maxOffset = {}
+      for entry in stack:
+        moduleIndex = entry[0]
+        offset = entry[1]
+        module = self.combinedMemoryMap[moduleIndex]
+        newMax = max(maxOffset.get(module, 0), offset)
+        maxOffset[module] = newMax
+
+      # create a dummy layout so that we can forward as a v1 request
+      addr = 0
+      startAddress = {}
+      for m in modules:
+        libSize = maxOffset[m] + 1
+        startAddress[m] = addr
+        addr += libSize
+
       url = self.symFileManager.sOptions["remoteSymbolServer"]
       rawModules =  []
       for m in modules:
-        l = [m.startAddress, m.libName, m.libSize, m.pdbAge, m.pdbSig, m.pdbName]
+        libSize = maxOffset[m] + 1
+        start = startAddress[m]
+        l = [start, m.libName, libSize, m.pdbAge, m.pdbSig, m.pdbName]
         rawModules.append(l)
-      requestObj = [{ "stack": stack, "memoryMap": rawModules, "forwarded": self.forwardCount + 1 }]
+
+      rawStack = []
+      for entry in stack:
+        moduleIndex = entry[0]
+        offset = entry[1]
+        module = self.combinedMemoryMap[moduleIndex]
+        start = startAddress[module]
+        pc = start + offset
+        rawStack.append(pc)
+
+      requestObj = [{ "stack": rawStack, "memoryMap": rawModules, "forwarded": self.forwardCount + 1 }]
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
@@ -280,14 +374,13 @@ class SymbolicationRequest:
         symbolicatedStack.append(hex(offset))
         continue
       module = self.combinedMemoryMap[moduleIndex]
-      pc = offset + module.startAddress
 
       # Don't look for a missing lib multiple times in one request
       if (module.pdbName, module.pdbSig, module.pdbAge) in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
-          unresolvedStack.append(pc)
-        symbolicatedStack.append(hex(pc) + " (in " + module.libName + ")")
+          unresolvedStack.append(entry)
+        symbolicatedStack.append(hex(offset) + " (in " + module.libName + ")")
         continue
 
       functionName = None
@@ -299,12 +392,12 @@ class SymbolicationRequest:
       else:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
-          unresolvedStack.append(pc)
+          unresolvedStack.append(entry)
           unresolvedModules.append(module)
         missingSymFiles.append((module.pdbName, module.pdbSig, module.pdbAge))
 
       if functionName == None:
-        functionName = hex(pc)
+        functionName = hex(offset)
       symbolicatedStack.append(functionName + " (in " + module.libName + ")")
 
     # Ask another server for help symbolicating unresolved addresses
