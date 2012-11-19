@@ -172,6 +172,13 @@ class SymbolicationRequest:
         if not isinstance(stack, list):
           LogTrace("stack is not a list")
           return
+        for entry in stack:
+          if not isinstance(entry, list):
+            LogTrace("stack entry is not a list")
+            return
+          if len(entry) != 2:
+            LogTrace("stack entry doesn't have exactly 2 elements")
+            return
 
         self.stacks.append(stack)
 
