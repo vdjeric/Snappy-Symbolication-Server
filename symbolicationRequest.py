@@ -136,6 +136,12 @@ class SymbolicationRequest:
         LogTrace("Invalid version: %s" % version)
         return
 
+      if "forwarded" in rawRequests:
+        if not isinstance(rawRequests["forwarded"], (int, long)):
+          LogTrace("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
+          return
+        self.forwardCount = rawRequests["forwarded"]
+
       if "memoryMap" not in rawRequests:
         LogTrace("Request is missing 'memoryMap' field")
         return
@@ -287,41 +293,26 @@ class SymbolicationRequest:
     LogTrace("Forwarding " + str(len(stack)) + " PCs for symbolication")
 
     try:
-      # find the maximum offset in each module
-      maxOffset = {}
-      for entry in stack:
-        moduleIndex = entry[0]
-        offset = entry[1]
-        module = self.combinedMemoryMap[moduleIndex]
-        newMax = max(maxOffset.get(module, 0), offset)
-        maxOffset[module] = newMax
-
-      # create a dummy layout so that we can forward as a v1 request
-      addr = 0
-      startAddress = {}
-      for m in modules:
-        libSize = maxOffset[m] + 1
-        startAddress[m] = addr
-        addr += libSize
-
       url = self.symFileManager.sOptions["remoteSymbolServer"]
       rawModules =  []
+      moduleToIndex = {}
+      moduleCount = 0
       for m in modules:
-        libSize = maxOffset[m] + 1
-        start = startAddress[m]
-        l = [start, m.libName, libSize, m.pdbAge, m.pdbSig, m.pdbName]
+        l = [m.libName, m.pdbAge, m.pdbSig, m.pdbName]
         rawModules.append(l)
+        moduleToIndex[m] = moduleCount
+        moduleCount += 1
 
       rawStack = []
       for entry in stack:
         moduleIndex = entry[0]
         offset = entry[1]
         module = self.combinedMemoryMap[moduleIndex]
-        start = startAddress[module]
-        pc = start + offset
-        rawStack.append(pc)
+        newIndex = moduleToIndex[module]
+        rawStack.append([newIndex, offset])
 
-      requestObj = [{ "stack": rawStack, "memoryMap": rawModules, "forwarded": self.forwardCount + 1 }]
+      requestObj = { "stacks": [rawStack], "memoryMap": rawModules,
+	             "forwarded": self.forwardCount + 1, "version": 2 }
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
