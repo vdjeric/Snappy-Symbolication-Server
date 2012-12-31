@@ -22,12 +22,6 @@ class ModuleV2:
     self.pdbSig = pdbSig
     self.pdbName = pdbName
 
-class ModuleV1(ModuleV2):
-  def __init__(self, startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
-    ModuleV2.__init__(self, libName, pdbAge, pdbSig, pdbName)
-    self.startAddress = startAddress
-    self.libSize = libSize
-
 def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
     LogTrace("Bad library name: " + str(libName))
@@ -58,51 +52,6 @@ def getModuleV2(libName, pdbAge, pdbSig, pdbName):
     return None
   return ModuleV2(libName, pdbAge, pdbSig, pdbName)
 
-def getModuleV1(startAddress, libName, libSize, pdbAge, pdbSig, pdbName):
-  if isinstance(startAddress, basestring):
-    startAddress = int(startAddress, 16)
-  if not isinstance(startAddress, (int, long)) or startAddress < 0:
-    LogTrace("Bad start address format: " + str(startAddress))
-    return None
-
-  if isinstance(libSize, basestring):
-    libSize = int(libSize)
-  if not isinstance(libSize, (int, long)) or int(libSize) < 0:
-    LogTrace("Bad PDB size: " + str(libSize))
-    return None
-
-  v2 = getModuleV2(libName, pdbAge, pdbSig, pdbName)
-  if v2 is None:
-    return None
-  return ModuleV1(startAddress, v2.libName, libSize, v2.pdbAge, v2.pdbSig,
-	 v2.pdbName)
-
-class ModuleMap:
-  def __init__(self, memoryMap):
-    self.sortedModuleAddresses = []
-    self.addressToModuleIndex = {}
-    self.memoryMap = memoryMap
-    moduleIndex = 0
-    for module in memoryMap:
-      startAddress = module.startAddress
-      self.sortedModuleAddresses.append(startAddress)
-      self.addressToModuleIndex[startAddress] = moduleIndex
-      moduleIndex += 1
-    self.sortedModuleAddresses = sorted(self.sortedModuleAddresses)
-
-  def LookupModuleIndex(self, pc):
-    index = bisect(self.sortedModuleAddresses, pc) - 1
-    if index < 0:
-      return -1
-
-    moduleStart = self.sortedModuleAddresses[index]
-    moduleIndex = self.addressToModuleIndex[moduleStart]
-    module = self.memoryMap[moduleIndex]
-    moduleEnd = moduleStart + module.libSize - 1
-    if moduleStart <= pc and pc <= moduleEnd:
-      return moduleIndex
-    return -1
-
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequests):
     self.Reset()
@@ -116,15 +65,14 @@ class SymbolicationRequest:
     self.isValidRequest = False
     self.memoryMaps = []
     self.stacks = []
-    self.moduleMap = None
     self.forwardCount = 0
 
   def ParseRequests(self, rawRequests):
     self.isValidRequest = False
-    if isinstance(rawRequests, dict):
-      self.ParseRequestsV2(rawRequests)
+    if not isinstance(rawRequests, dict):
+      LogTrace("Request is not a dictionary")
       return
-    self.ParseRequestsV1(rawRequests)
+    self.ParseRequestsV2(rawRequests)
 
   def ParseRequestsV2(self, rawRequests):
     try:
@@ -187,101 +135,6 @@ class SymbolicationRequest:
             return
 
         self.stacks.append(stack)
-
-    except Exception as e:
-      LogTrace("Exception while parsing request: " + str(e))
-      return
-
-    self.isValidRequest = True
-
-  def ParseRequestsV1(self, rawRequests):
-    if not isinstance(rawRequests, list):
-      LogTrace("rawRequests is not a list")
-      return
-
-    if len(rawRequests) == 0:
-      return
-
-    for rawRequest in rawRequests:
-      self.isValidRequest = False
-      self.ParseRequestV1(rawRequest)
-      if not self.isValidRequest:
-        return
-
-    firstModuleMap = ModuleMap(self.memoryMaps[0])
-    self.combinedMemoryMap = []
-    for stackNum in range(len(self.stacks)):
-      stack = self.stacks[stackNum]
-      oldLength = len(self.combinedMemoryMap)
-      self.combinedMemoryMap.extend(self.memoryMaps[stackNum])
-      curModuleMap = None
-      if stackNum != 0:
-        curModuleMap = ModuleMap(self.memoryMaps[stackNum])
-      self.memoryMaps[stackNum] = None
-      newStack = []
-      for pc in stack:
-        moduleIndex = self.LookupModuleIndex(pc, curModuleMap, firstModuleMap,
-                                             oldLength)
-        if moduleIndex == -1:
-          LogTrace("Couldn't find module for PC: " + hex(pc))
-          newStack.append((moduleIndex, pc))
-          continue
-        module = self.combinedMemoryMap[moduleIndex]
-        newStack.append((moduleIndex, pc - module.startAddress))
-      self.stacks[stackNum] = newStack
-
-    for moduleIndex in range(len(self.combinedMemoryMap)):
-      old = self.combinedMemoryMap[moduleIndex]
-      new = ModuleV2(old.libName, old.pdbAge, old.pdbSig, old.pdbName)
-      self.combinedMemoryMap[moduleIndex] = new
-
-  def ParseRequestV1(self, rawRequest):
-    try:
-      # Parse to confirm valid format before doing any processing
-      if not isinstance(rawRequest, dict):
-        LogTrace("Request is not a map")
-        return
-      if "memoryMap" not in rawRequest or "stack" not in rawRequest:
-        LogTrace("Request is missing 'memoryMap' or 'stack' fields")
-        return
-      if not isinstance(rawRequest["memoryMap"], list):
-        LogTrace("'memoryMap' field in request is not a list")
-      if not isinstance(rawRequest["stack"], list):
-        LogTrace("'stack' field in request is not a list")
-        return
-
-      # Check stack is well-formatted
-      cleanStack = []
-      for pc in rawRequest["stack"]:
-        if isinstance(pc, basestring):
-          pc = int(pc, 16)
-        if not isinstance(pc, (int, long)) or pc < 0:
-          LogTrace("Invalid stack address: " + hex(pc))
-          return
-        cleanStack.append(pc)
-
-      # Check memory map is well-formatted
-      cleanMemoryMap = []
-      for rawModule in rawRequest["memoryMap"]:
-        if not isinstance(rawModule, list) or len(rawModule) != 6:
-          LogTrace("Entry in memory map is not a 6 item list: %s" % rawModule)
-          return
-        
-        module = getModuleV1(*rawModule)
-        if module is None:
-          return
-
-        cleanMemoryMap.append(module)
-
-      # Check if this request has been forwarded from another SymbolicationServer
-      if "forwarded" in rawRequest:
-        if not isinstance(rawRequest["forwarded"], (int, long)):
-          LogTrace("Invalid 'forwards' field: " + str(rawRequest["forwarded"]))
-          return
-        self.forwardCount = rawRequest["forwarded"]
-
-      self.stacks.append(cleanStack)
-      self.memoryMaps.append(cleanMemoryMap)
 
     except Exception as e:
       LogTrace("Exception while parsing request: " + str(e))
@@ -355,7 +208,6 @@ class SymbolicationRequest:
     unresolvedStack = []
     unresolvedModules = []
     stack = self.stacks[stackNum]
-    curModuleMap = None
 
     for entry in stack:
       pcIndex += 1
@@ -396,16 +248,3 @@ class SymbolicationRequest:
       self.ForwardRequest(unresolvedIndexes, unresolvedStack, unresolvedModules, symbolicatedStack)
 
     return symbolicatedStack
-
-  def LookupModuleIndex(self, pc, curModuleMap, firstModuleMap, diff):
-    memoryMapsToConsult = [curModuleMap, firstModuleMap]
-    for dataIndex in range(len(memoryMapsToConsult)):
-      data = memoryMapsToConsult[dataIndex]
-      if data == None:
-        continue
-      r = data.LookupModuleIndex(pc)
-      if r != -1:
-        if dataIndex == 0:
-          return r + diff
-        return r
-    return -1
