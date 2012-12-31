@@ -39,34 +39,31 @@ class SymFileManager:
   def __init__(self, options):
     self.sOptions = options
 
-  def GetLibSymbolMap(self, pdbName, pdbSig, pdbAge):
+  def GetLibSymbolMap(self, libName, breakpadId):
     # Empty lib name means client couldn't associate frame with any lib
-    if pdbName == "":
+    if libName == "":
       return None
-
-    pdbId = pdbSig + pdbAge
 
     # Check cache first
     libSymbolMap = None
     self.sCacheLock.acquire()
     try:
-      if pdbName in self.sCache and pdbId in self.sCache[pdbName]:
-        libSymbolMap = self.sCache[pdbName][pdbId]
-        #print "Found existing PDB entry with " + str(libSymbolMap.entryCount) + " entries"
-        self.UpdateMruList(pdbName, pdbId)
+      if libName in self.sCache and breakpadId in self.sCache[libName]:
+        libSymbolMap = self.sCache[libName][breakpadId]
+        self.UpdateMruList(libName, breakpadId)
     finally:
       self.sCacheLock.release()
 
     if libSymbolMap is None:
-      LogTrace("Need to fetch PDB file for " + pdbName + " " + pdbSig + "-" + pdbAge)
+      LogTrace("Need to fetch PDB file for " + libName + " " + breakpadId)
 
       # Guess the name of the .sym file on disk
-      if pdbName[-4:] == ".pdb":
-        symFileName = re.sub(r"\.[^\.]+$", ".sym", pdbName)
+      if libName[-4:] == ".pdb":
+        symFileName = re.sub(r"\.[^\.]+$", ".sym", libName)
       else:
-        symFileName = pdbName + ".sym"
+        symFileName = libName + ".sym"
 
-      pathSuffix = os.sep + pdbName + os.sep + pdbId + os.sep + symFileName
+      pathSuffix = os.sep + libName + os.sep + breakpadId + os.sep + symFileName
       firefoxPath = self.sOptions['firefoxSymbolsPath'] + pathSuffix
       osPath = self.sOptions['osSymbolsPath'] + pathSuffix
 
@@ -77,15 +74,15 @@ class SymFileManager:
         LogTrace("No matching sym files, tried " + firefoxPath + " and " + osPath)
         return None
 
-      LogTrace("Storing libSymbolMap under [" + pdbName + "][" + pdbId + "]")
+      LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
       self.sCacheLock.acquire()
       try:
         self.MaybeEvict(libSymbolMap.GetEntryCount())
-        if pdbName not in self.sCache:
-          self.sCache[pdbName] = {}
-        self.sCache[pdbName][pdbId] = libSymbolMap
+        if libName not in self.sCache:
+          self.sCache[libName] = {}
+        self.sCache[libName][breakpadId] = libSymbolMap
         self.sCacheCount += libSymbolMap.GetEntryCount()
-        self.UpdateMruList(pdbName, pdbId)
+        self.UpdateMruList(libName, breakpadId)
         LogTrace(str(self.sCacheCount) + " symbols in cache after fetching symbol file")
       finally:
         self.sCacheLock.release()
