@@ -15,12 +15,10 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-class ModuleV2:
-  def __init__(self, libName, pdbAge, pdbSig, pdbName):
+class ModuleV3:
+  def __init__(self, libName, breakpadId):
     self.libName = libName
-    self.pdbAge = pdbAge
-    self.pdbSig = pdbSig
-    self.pdbName = pdbName
+    self.breakpadId = breakpadId
 
 def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
@@ -50,7 +48,18 @@ def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
     LogTrace("Bad PDB name: " + str(pdbName))
     return None
-  return ModuleV2(libName, pdbAge, pdbSig, pdbName)
+  return ModuleV3(pdbName, pdbSig + pdbAge)
+
+def getModuleV3(libName, breakpadId):
+  if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
+    LogTrace("Bad library name: " + str(libName))
+    return None
+
+  if not isinstance(breakpadId, basestring):
+    LogTrace("Bad breakpad id: " + str(breakpadId))
+    return None
+
+  return ModuleV3(libName, breakpadId)
 
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequests):
@@ -69,18 +78,17 @@ class SymbolicationRequest:
 
   def ParseRequests(self, rawRequests):
     self.isValidRequest = False
-    if not isinstance(rawRequests, dict):
-      LogTrace("Request is not a dictionary")
-      return
-    self.ParseRequestsV2(rawRequests)
 
-  def ParseRequestsV2(self, rawRequests):
     try:
+      if not isinstance(rawRequests, dict):
+        LogTrace("Request is not a dictionary")
+        return
+
       if "version" not in rawRequests:
         LogTrace("Request is missing 'version' field")
         return
       version = rawRequests["version"]
-      if version != 2:
+      if version != 2 and version != 3:
         LogTrace("Invalid version: %s" % version)
         return
 
@@ -112,11 +120,21 @@ class SymbolicationRequest:
           LogTrace("Entry in memory map is not a list: " + str(module))
           return
 
-        if len(module) != 4:
-          LogTrace("Entry in memory map is not a 4 item list: " + str(module))
+        if version == 2:
+          if len(module) != 4:
+            LogTrace("Entry in memory map is not a 4 item list: " + str(module))
+            return
+          module = getModuleV2(*module)
+        else:
+          assert version == 3
+          if len(module) != 2:
+            LogTrace("Entry in memory map is not a 2 item list: " + str(module))
+            return
+          module = getModuleV3(*module)
+
+        if module is None:
           return
 
-        module = getModuleV2(*module)
         cleanMemoryMap.append(module)
 
       self.combinedMemoryMap = cleanMemoryMap
@@ -151,7 +169,9 @@ class SymbolicationRequest:
       moduleToIndex = {}
       moduleCount = 0
       for m in modules:
-        l = [m.libName, m.pdbAge, m.pdbSig, m.pdbName]
+        pdbSig = m.breakpadId[0:32]
+        pdbAge = int(m.breakpadId[32:],16)
+        l = [m.libName, pdbAge, pdbSig, m.libName]
         rawModules.append(l)
         moduleToIndex[m] = moduleCount
         moduleCount += 1
@@ -219,7 +239,7 @@ class SymbolicationRequest:
       module = self.combinedMemoryMap[moduleIndex]
 
       # Don't look for a missing lib multiple times in one request
-      if (module.pdbName, module.pdbSig, module.pdbAge) in missingSymFiles:
+      if (module.libName, module.breakpadId) in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(entry)
@@ -227,9 +247,8 @@ class SymbolicationRequest:
         continue
 
       functionName = None
-      libSymbolMap = self.symFileManager.GetLibSymbolMap(module.pdbName,
-                                                         module.pdbSig,
-                                                         module.pdbAge)
+      libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
+                                                         module.breakpadId)
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(offset)
       else:
@@ -237,7 +256,7 @@ class SymbolicationRequest:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(entry)
           unresolvedModules.append(module)
-        missingSymFiles.append((module.pdbName, module.pdbSig, module.pdbAge))
+        missingSymFiles.append((module.libName, module.breakpadId))
 
       if functionName == None:
         functionName = hex(offset)
