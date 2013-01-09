@@ -169,9 +169,7 @@ class SymbolicationRequest:
       moduleToIndex = {}
       moduleCount = 0
       for m in modules:
-        pdbSig = m.breakpadId[0:32]
-        pdbAge = int(m.breakpadId[32:],16)
-        l = [m.libName, pdbAge, pdbSig, m.libName]
+        l = [m.libName, m.breakpadId]
         rawModules.append(l)
         moduleToIndex[m] = moduleCount
         moduleCount += 1
@@ -185,7 +183,7 @@ class SymbolicationRequest:
         rawStack.append([newIndex, offset])
 
       requestObj = { "stacks": [rawStack], "memoryMap": rawModules,
-	             "forwarded": self.forwardCount + 1, "version": 2 }
+	             "forwarded": self.forwardCount + 1, "version": 3 }
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
