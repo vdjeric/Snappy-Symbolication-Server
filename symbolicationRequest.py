@@ -21,10 +21,6 @@ class ModuleV3:
     self.breakpadId = breakpadId
 
 def getModuleV2(libName, pdbAge, pdbSig, pdbName):
-  if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
-    LogTrace("Bad library name: " + str(libName))
-    return None
-
   if isinstance(pdbSig, basestring):
     matches = gPdbSigRE.match(pdbSig)
     if matches:
