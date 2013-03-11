@@ -7,17 +7,10 @@ If you're interested in setting up local symbols for use with the Gecko profiler
 
 https://developer.mozilla.org/en/Performance/Profiling_with_the_Built-in_Profiler_and_Local_Symbols_on_Windows
 
-RELATIONSHIP TO FIREFOX HANG REPORTER FEATURE
-==============================================
-
-The Hang Reporter is a new Firefox feature that reports transient main thread hangs to Telemetry. It is only useful on Windows builds from the Profiling branch because it relies on having Firefox compiled with frame pointers to unwind call stacks. The Hang Reporter functionality is #ifdef'd out on regular release builds. The expected users of this feature are developers running profiling builds. The functionality is also used by the built-in Gecko profiler.
-
-The about:telemetry extension makes it possible to inspect the hang stacks locally. The about:telemetry extension will send the raw stacks to the Symbolication Server for server-side symbolication (using Socorro symbols) and then display the results within the about:telemetry page. This repo contains the code for the Symbolication Server.
-
 BASICS
 ===========
-1. The sample.conf file in this directory contains a sample configuration. To run the server locally, you will have to edit the paths to point to your local symbol dirs. Everything else should be OK to leave unchanged.
-2. Run the server with "python symbolicationWebService.py sample.conf"
+1. The sample.ini file in this directory contains a sample configuration. To run the server locally, you will have to edit the paths to point to your local symbol dirs. Everything else should be OK to leave unchanged.
+2. Run the server with "python symbolicationWebService.py sample.ini"
 3. To stop the server send it a kill signal or Ctrl-C
 
 If you find the server is rejecting your symbolication requests, check the log (stdout/stderr) for clues. For more verbose logging, set the "enableTracing" setting to 1 in the configuration file.
@@ -25,27 +18,9 @@ If you find the server is rejecting your symbolication requests, check the log (
 PROTOCOL
 ===========
 
-The symbolication requests are in JSON format. This is a minimal symbolication request:
+The symbolication requests are in JSON format. This is a short symbolication request:
 
-curl -d '[{"stack":["0x247E0"], "memoryMap":[[0, "mozjs.dll", 200000, 2, "E9DC73C71231454A80C1AB0D5B9B4C6F", "mozjs.pdb"]]}]' http://127.0.0.1:80/
 
-This is the corresponding response: [["JS::Value::isPrimitive() in mozjs.dll"]]
+curl -d '{"stacks":[[[0,5063],[1, 65802]]],"memoryMap":[["thunderbird.pdb","F575766C77264ED6A1AB25C870A5BB661"],["wntdll.pdb","D74F79EB1F8D4A45ABCD2F476CCABACC2"]],"version":3,"osName":"Windows","appName":"Thunderbird"}' http://symbolapi.mozilla.org/
 
----
-
-Multiple symbolication requests can be made at once:
-
-[ <symbolication request #1>, <symbolication request #2>, etc ]
-
-where each symbolication request is a JSON object with two properties, "stack" and "memoryMap":
-
-{ "stack": [ ... ], "memoryMap": [ ... ] }
-
-The "stack" property is an array of PCs. Each PC is either a string with the address in hex format or an integer value. The PC address is the instruction's address in the process's address space. The server will calculate each instruction's library offset itself.
-
-The "memoryMap" property is an array of library descriptions. Each library description is a 6-element array formatted as follows:
-
-[ library start address as hex string or int, library name as string, library size in memory as an integer, PDB age as an integer, PDB signature as a string, PDB name as string ]
-
-The server response will be a JSON array object, with each element representing a response to a request in the submitted request array. Within each response is another array with each element a symbolicated function name and memory address. You will see "???" when the function name can not be found.
-
+This is the corresponding response: [["do_main (in thunderbird.pdb)", "KiUserCallbackDispatcher (in wntdll.pdb)"]]
