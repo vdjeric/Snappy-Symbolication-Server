@@ -36,8 +36,11 @@ gOptions = {
   "prefetchThreshold": 48,
   # Maximum number of library versions to pre-fetch per library
   "prefetchMaxSymbolsPerLib": 3,
-  # Paths to .SYM files, expressed internally as a dictionary mapping app or
-  # platform names to directories
+  # Default symbol lookup directories
+  "defaultApp": "FIREFOX",
+  "defaultOs": "WINDOWS",
+  # Paths to .SYM files, expressed internally as a mapping of app or platform names
+  # to directories
   # Note: App & OS names from requests are converted to all-uppercase internally
   "symbolPaths": {
     # Location of Firefox library symbols
@@ -45,7 +48,7 @@ gOptions = {
     # Location of Thunderbird library symbols
     "THUNDERBIRD": os.getcwd() + os.sep + "symbols_tbrd" + os.sep,
     # Location of Windows library symbols
-    "WINNT": os.getcwd() + os.sep + "symbols_os" + os.sep
+    "WINDOWS": os.getcwd() + os.sep + "symbols_os" + os.sep
   }
 }
 
@@ -168,6 +171,19 @@ def ReadConfigFile():
     for (name, path) in configPaths:
       gOptions["symbolPaths"][name.upper()] = path
 
+  # Convert to upper-case
+  gOptions["defaultApp"] = gOptions["defaultApp"].upper()
+  gOptions["defaultOs"] = gOptions["defaultOs"].upper()
+
+  # Check defaults are valid
+  if gOptions["defaultApp"] not in gOptions["symbolPaths"]:
+    LogError("Invalid defaultApp '" + gOptions["defaultApp"] + "', no corresponding path in [SymbolPaths] section.")
+    return False
+  if gOptions["defaultOs"] not in gOptions["symbolPaths"]:
+    LogError("Invalid defaultOs '" + gOptions["defaultOs"] + "', no corresponding path in [SymbolPaths] section.")
+    return False
+  
+
   return True
 
 def Main():
@@ -182,7 +198,7 @@ def Main():
   gSymFileManager = SymFileManager(gOptions)
 
   # Prefetch recent Firefox symbols + start the periodic prefetch callbacks
-  if "FIREFOX" in gOptions["symbolPaths"]:
+  if gOptions["defaultApp"] == "FIREFOX":
     gSymFileManager.PrefetchRecentSymbolFiles()
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))

@@ -15,10 +15,6 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-# Default OS & app names when they're missing or invalid in the request
-DEFAULT_APP_NAME = "FIREFOX"
-DEFAULT_OS_NAME = "WINNT"
-
 class ModuleV3:
   def __init__(self, libName, breakpadId):
     self.libName = libName
@@ -67,8 +63,8 @@ class SymbolicationRequest:
     self.symFileManager = symFileManager
     self.stacks = []
     self.memoryMaps = []
-    self.appName = DEFAULT_APP_NAME
-    self.osName = DEFAULT_OS_NAME
+    self.appName = symFileManager.sOptions["defaultApp"]
+    self.osName = symFileManager.sOptions["defaultOs"]
     self.ParseRequests(rawRequests)
 
   def Reset(self):
@@ -102,7 +98,6 @@ class SymbolicationRequest:
           return
         self.forwardCount = rawRequests["forwarded"]
 
-      self.appName = DEFAULT_APP_NAME
       if "appName" in rawRequests:
         requestingApp = rawRequests["appName"].upper()
         if requestingApp in self.symFileManager.sOptions["symbolPaths"]:
