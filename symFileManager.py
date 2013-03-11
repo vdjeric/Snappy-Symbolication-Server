@@ -39,7 +39,7 @@ class SymFileManager:
   def __init__(self, options):
     self.sOptions = options
 
-  def GetLibSymbolMap(self, libName, breakpadId):
+  def GetLibSymbolMap(self, libName, breakpadId, appName, osName):
     # Empty lib name means client couldn't associate frame with any lib
     if libName == "":
       return None
@@ -64,14 +64,17 @@ class SymFileManager:
         symFileName = libName + ".sym"
 
       pathSuffix = os.sep + libName + os.sep + breakpadId + os.sep + symFileName
-      firefoxPath = self.sOptions['firefoxSymbolsPath'] + pathSuffix
-      osPath = self.sOptions['osSymbolsPath'] + pathSuffix
 
-      libSymbolMap = self.FetchSymbolsFromFile(firefoxPath)
+      # Check for the symbols in the app directory
+      appPath = self.sOptions["symbolPaths"][appName] + pathSuffix
+      # If not found in app directory, also check for the symbols in the os directory
+      osPath = self.sOptions["symbolPaths"][osName] + pathSuffix
+
+      libSymbolMap = self.FetchSymbolsFromFile(appPath)
       if not libSymbolMap:
         libSymbolMap = self.FetchSymbolsFromFile(osPath)
       if not libSymbolMap:
-        LogTrace("No matching sym files, tried " + firefoxPath + " and " + osPath)
+        LogTrace("No matching sym files, tried " + appPath + " and " + osPath)
         return None
 
       LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
@@ -151,7 +154,7 @@ class SymFileManager:
     symDirsToInspect = {}
     for pdbName in PREFETCHED_LIBS:
       symDirsToInspect[pdbName] = []
-      topLibPath = self.sOptions['firefoxSymbolsPath'] + os.sep + pdbName
+      topLibPath = self.sOptions['symbolPaths']['FIREFOX'] + os.sep + pdbName
 
       try:
         symbolDirs = os.listdir(topLibPath)

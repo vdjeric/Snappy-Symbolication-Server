@@ -15,6 +15,10 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
+# Default OS & app names when they're missing or invalid in the request
+DEFAULT_APP_NAME = "FIREFOX"
+DEFAULT_OS_NAME = "WINNT"
+
 class ModuleV3:
   def __init__(self, libName, breakpadId):
     self.libName = libName
@@ -63,6 +67,8 @@ class SymbolicationRequest:
     self.symFileManager = symFileManager
     self.stacks = []
     self.memoryMaps = []
+    self.appName = DEFAULT_APP_NAME
+    self.osName = DEFAULT_OS_NAME
     self.ParseRequests(rawRequests)
 
   def Reset(self):
@@ -70,6 +76,8 @@ class SymbolicationRequest:
     self.isValidRequest = False
     self.memoryMaps = []
     self.stacks = []
+    self.appName = ""
+    self.osName = ""
     self.forwardCount = 0
 
   def ParseRequests(self, rawRequests):
@@ -93,6 +101,17 @@ class SymbolicationRequest:
           LogTrace("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
           return
         self.forwardCount = rawRequests["forwarded"]
+
+      self.appName = DEFAULT_APP_NAME
+      if "appName" in rawRequests:
+        requestingApp = rawRequests["appName"].upper()
+        if requestingApp in self.symFileManager.sOptions["symbolPaths"]:
+          self.appName = requestingApp
+
+      if "osName" in rawRequests:
+        requestingOs = rawRequests["osName"].upper()
+        if requestingOs in self.symFileManager.sOptions["symbolPaths"]:
+          self.osName = requestingOs
 
       if "memoryMap" not in rawRequests:
         LogTrace("Request is missing 'memoryMap' field")
@@ -178,8 +197,9 @@ class SymbolicationRequest:
         newIndex = moduleToIndex[module]
         rawStack.append([newIndex, offset])
 
-      requestObj = { "stacks": [rawStack], "memoryMap": rawModules,
-	             "forwarded": self.forwardCount + 1, "version": 3 }
+      requestObj = { "appName": self.appName, "osName": self.osName,
+                     "stacks": [rawStack], "memoryMap": rawModules,
+                     "forwarded": self.forwardCount + 1, "version": 3 }
       requestJson = json.dumps(requestObj)
       headers = { "Content-Type": "application/json" }
       requestHandle = urllib2.Request(url, requestJson, headers)
@@ -242,7 +262,9 @@ class SymbolicationRequest:
 
       functionName = None
       libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
-                                                         module.breakpadId)
+                                                         module.breakpadId,
+                                                         self.appName,
+                                                         self.osName)
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(offset)
       else:

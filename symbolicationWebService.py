@@ -9,7 +9,7 @@ from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from SocketServer import ThreadingMixIn
 import threading
 import json
-import re
+import ConfigParser
 
 # Timeout (in seconds) for reading in a request from a client connection
 SOCKET_READ_TIMEOUT = 10.0
@@ -17,15 +17,14 @@ SOCKET_READ_TIMEOUT = 10.0
 # .SYM cache manager
 gSymFileManager = None
 
+# Default config options
 gOptions = {
   # IP address to listen on
   "hostname": "0.0.0.0",
   # TCP port to listen on
   "portNumber": 80,
-  # Location of Firefox library symbols
-  "firefoxSymbolsPath": os.getcwd() + os.sep + "symbols_ffx" + os.sep,
-  # Location of Windows (and other) library symbols
-  "osSymbolsPath": os.getcwd() + os.sep + "symbols_os" + os.sep,
+  # Trace-level logging (verbose)
+  "enableTracing": 0,
   # Fallback server if symbol is not found locally
   "remoteSymbolServer": "",
   # Maximum number of symbol files to keep in memory
@@ -37,8 +36,17 @@ gOptions = {
   "prefetchThreshold": 48,
   # Maximum number of library versions to pre-fetch per library
   "prefetchMaxSymbolsPerLib": 3,
-  # Trace-level logging (verbose)
-  "enableTracing": 0
+  # Paths to .SYM files, expressed internally as a dictionary mapping app or
+  # platform names to directories
+  # Note: App & OS names from requests are converted to all-uppercase internally
+  "symbolPaths": {
+    # Location of Firefox library symbols
+    "FIREFOX": os.getcwd() + os.sep + "symbols_ffx" + os.sep,
+    # Location of Thunderbird library symbols
+    "THUNDERBIRD": os.getcwd() + os.sep + "symbols_tbrd" + os.sep,
+    # Location of Windows library symbols
+    "WINNT": os.getcwd() + os.sep + "symbols_os" + os.sep
+  }
 }
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -114,46 +122,51 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def ReadConfigFile():
   configFileData = []
-  if len(sys.argv) > 2:
+  if len(sys.argv) == 1:
+    return True
+  elif len(sys.argv) > 2:
     LogError("Usage: symbolicationWebService.py [<config file>]")
     return False
   elif len(sys.argv) == 2:
     try:
+      configParser = ConfigParser.ConfigParser()
+      # Make parser case-sensitive
+      configParser.optionxform=str
       configFile = open(sys.argv[1], "r")
-      configFileData = configFile.read()
-      configFileData = configFileData.split("\n")
+      configParser.readfp(configFile)
       configFile.close()
+    except ConfigParser.Error as e:
+      LogError("Unable to parse config file " + sys.argv[1] + ": " + str(e))
     except:
       LogError("Unable to open config file " + sys.argv[1])
       return False
 
-  # Parse configuration file, if any
-  lineNumber = 0
-  for line in configFileData:
-    lineNumber += 1
+  # Check for section names
+  if set(configParser.sections()) != set(["General", "SymbolPaths"]):
+    LogError("Config file should be made up of two sections: 'General' and 'SymbolPaths'")
+    return False
 
-    # Skip over comments and blank lines
-    if re.match(r"\s*#", line) or re.match(r"\s*$", line):
-      continue
-
-    # Config lines have key = value format
-    matches = re.match(r"\s*(\S*)\s*=\s*(\S*)\s*$", line)
-    if not matches or len(matches.groups()) != 2:
-      LogError("Couldn't parse config line " + str(lineNumber) + ": " + line)
+  generalSectionOptions = configParser.items("General")
+  for (option, value) in generalSectionOptions:
+    if option not in gOptions:
+      LogError("Unknown config option '" + option + "' in the 'General' section of config file")
       return False
-    (configKey, configValue) = matches.groups()
-
-    if configKey not in gOptions:
-      LogError("Unknown config option '" + configKey + "' on line " + str(lineNumber))
-      return False
-    elif type(gOptions[configKey]) == int:
+    elif type(gOptions[option]) == int:
       try:
-        configValue = int(configValue)
+        value = int(value)
       except ValueError:
-        LogError("Integer value expected for config option '" + configKey + "'")
+        LogError("Integer value expected for config option '" + option + "'")
         return False
+    gOptions[option] = value
 
-    gOptions[configKey] = configValue
+  # Get the "application -> path" mapping from the config file
+  configPaths = configParser.items("SymbolPaths")
+  if configPaths:
+    # Drop defaults if config file entries exist
+    gOptions["symbolPaths"] = {}
+    # Convert path names to upper case
+    for (name, path) in configPaths:
+      gOptions["symbolPaths"][name.upper()] = path
 
   return True
 
@@ -168,8 +181,9 @@ def Main():
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(gOptions)
 
-  # Prefetch recent symbols + start the periodic prefetch callbacks
-  gSymFileManager.PrefetchRecentSymbolFiles()
+  # Prefetch recent Firefox symbols + start the periodic prefetch callbacks
+  if "FIREFOX" in gOptions["symbolPaths"]:
+    gSymFileManager.PrefetchRecentSymbolFiles()
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))
 
