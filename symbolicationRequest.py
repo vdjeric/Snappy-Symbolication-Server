@@ -102,13 +102,13 @@ class SymbolicationRequest:
       if "appName" in rawRequests:
         requestingApp = rawRequests["appName"].upper()
         if requestingApp in self.symFileManager.sOptions["symbolPaths"]:
-          self.appName = requestingApp
+          self.symbolSources.append(requestingApp)
 
       # Ditto
       if "osName" in rawRequests:
         requestingOs = rawRequests["osName"].upper()
         if requestingOs in self.symFileManager.sOptions["symbolPaths"]:
-          self.osName = requestingOs
+          self.symbolSources.append(requestingOs)
 
       # Client specifies which sets of symbols should be used
       if "symbolSources" in rawRequests:
