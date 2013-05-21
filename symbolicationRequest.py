@@ -63,8 +63,7 @@ class SymbolicationRequest:
     self.symFileManager = symFileManager
     self.stacks = []
     self.memoryMaps = []
-    self.appName = symFileManager.sOptions["defaultApp"]
-    self.osName = symFileManager.sOptions["defaultOs"]
+    self.symbolSources = []
     self.ParseRequests(rawRequests)
 
   def Reset(self):
@@ -98,15 +97,36 @@ class SymbolicationRequest:
           return
         self.forwardCount = rawRequests["forwarded"]
 
+      # Only used for compatibility with older clients.
+      # TODO: Remove after June 2013.
       if "appName" in rawRequests:
         requestingApp = rawRequests["appName"].upper()
         if requestingApp in self.symFileManager.sOptions["symbolPaths"]:
           self.appName = requestingApp
 
+      # Ditto
       if "osName" in rawRequests:
         requestingOs = rawRequests["osName"].upper()
         if requestingOs in self.symFileManager.sOptions["symbolPaths"]:
           self.osName = requestingOs
+
+      # Client specifies which sets of symbols should be used
+      if "symbolSources" in rawRequests:
+        try:
+          sourceList = [x.upper() for x in rawRequests["symbolSources"]]
+          for source in sourceList:
+            if source in self.symFileManager.sOptions["symbolPaths"]:
+              self.symbolSources.append(source)
+            else:
+              LogTrace("Unrecognized symbol source: " + source)
+              continue
+        except:
+          self.symbolSources = []
+          pass
+
+      if not self.symbolSources:
+        self.symbolSources.append(self.symFileManager.sOptions["defaultApp"])
+        self.symbolSources.append(self.symFileManager.sOptions["defaultOs"])
 
       if "memoryMap" not in rawRequests:
         LogTrace("Request is missing 'memoryMap' field")
@@ -192,7 +212,7 @@ class SymbolicationRequest:
         newIndex = moduleToIndex[module]
         rawStack.append([newIndex, offset])
 
-      requestObj = { "appName": self.appName, "osName": self.osName,
+      requestObj = { "symbolSources": self.symbolSources,
                      "stacks": [rawStack], "memoryMap": rawModules,
                      "forwarded": self.forwardCount + 1, "version": 3 }
       requestJson = json.dumps(requestObj)
@@ -258,8 +278,7 @@ class SymbolicationRequest:
       functionName = None
       libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
                                                          module.breakpadId,
-                                                         self.appName,
-                                                         self.osName)
+                                                         self.symbolSources)
       if libSymbolMap:
         functionName = libSymbolMap.Lookup(offset)
       else:

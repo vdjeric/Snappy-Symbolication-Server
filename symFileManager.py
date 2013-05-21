@@ -39,7 +39,7 @@ class SymFileManager:
   def __init__(self, options):
     self.sOptions = options
 
-  def GetLibSymbolMap(self, libName, breakpadId, appName, osName):
+  def GetLibSymbolMap(self, libName, breakpadId, symbolSources):
     # Empty lib name means client couldn't associate frame with any lib
     if libName == "":
       return None
@@ -65,16 +65,15 @@ class SymFileManager:
 
       pathSuffix = os.sep + libName + os.sep + breakpadId + os.sep + symFileName
 
-      # Check for the symbols in the app directory
-      appPath = self.sOptions["symbolPaths"][appName] + pathSuffix
-      # If not found in app directory, also check for the symbols in the os directory
-      osPath = self.sOptions["symbolPaths"][osName] + pathSuffix
+      # Look in the symbol dirs for this .sym file
+      for source in symbolSources:
+        path = self.sOptions["symbolPaths"][source] + pathSuffix
+        libSymbolMap = self.FetchSymbolsFromFile(path)
+        if libSymbolMap:
+          break
 
-      libSymbolMap = self.FetchSymbolsFromFile(appPath)
       if not libSymbolMap:
-        libSymbolMap = self.FetchSymbolsFromFile(osPath)
-      if not libSymbolMap:
-        LogTrace("No matching sym files, tried " + appPath + " and " + osPath)
+        LogTrace("No matching sym files, tried " + str(symbolSources))
         return None
 
       LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
