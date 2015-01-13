@@ -21,6 +21,6 @@ PROTOCOL
 The symbolication requests are in JSON format. This is a short symbolication request:
 
 
-curl -d '{"stacks":[[[0,5063],[1, 65802]]],"memoryMap":[["thunderbird.pdb","F575766C77264ED6A1AB25C870A5BB661"],["wntdll.pdb","D74F79EB1F8D4A45ABCD2F476CCABACC2"]],"version":3,"osName":"Windows","appName":"Thunderbird"}' http://symbolapi.mozilla.org/
+curl -d '{"stacks":[[[0,5063],[1, 65802]]],"memoryMap":[["thunderbird.pdb","F575766C77264ED6A1AB25C870A5BB661"],["wntdll.pdb","D74F79EB1F8D4A45ABCD2F476CCABACC2"]],"version":4,"osName":"Windows","appName":"Thunderbird"}' http://symbolapi.mozilla.org/
 
-This is the corresponding response: [["do_main (in thunderbird.pdb)", "KiUserCallbackDispatcher (in wntdll.pdb)"]]
+This is the corresponding response: {"symbolicatedStacks": [["do_main (in thunderbird.pdb)", "KiUserCallbackDispatcher (in wntdll.pdb)"]], "knownModules": [true, true]}
