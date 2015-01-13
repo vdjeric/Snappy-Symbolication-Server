@@ -108,14 +108,19 @@ class RequestHandler(BaseHTTPRequestHandler):
     try:
       self.sendHeaders(200)
 
-      response = []
+      response = { 'symbolicatedStacks': [] }
       for stackIndex in range(len(request.stacks)):
         symbolicatedStack = request.Symbolicate(stackIndex)
 
         # Free up memory ASAP
         request.stacks[stackIndex] = []
 
-        response.append(symbolicatedStack)
+        response['symbolicatedStacks'].append(symbolicatedStack)
+
+      response['knownModules'] = request.knownModules[:]
+      if not request.includeKnownModulesInResponse:
+        response = response['symbolicatedStacks']
+
       request.Reset()
 
       LogTrace("Response: " + json.dumps(response))

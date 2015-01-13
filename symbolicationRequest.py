@@ -62,14 +62,18 @@ class SymbolicationRequest:
     self.Reset()
     self.symFileManager = symFileManager
     self.stacks = []
-    self.memoryMaps = []
+    self.combinedMemoryMap = []
+    self.knownModules = []
+    self.includeKnownModulesInResponse = True
     self.symbolSources = []
     self.ParseRequests(rawRequests)
 
   def Reset(self):
     self.symFileManager = None
     self.isValidRequest = False
-    self.memoryMaps = []
+    self.combinedMemoryMap = []
+    self.knownModules = []
+    self.includeKnownModulesInResponse = True
     self.stacks = []
     self.appName = ""
     self.osName = ""
@@ -87,7 +91,7 @@ class SymbolicationRequest:
         LogTrace("Request is missing 'version' field")
         return
       version = rawRequests["version"]
-      if version != 2 and version != 3:
+      if version != 2 and version != 3 and version != 4:
         LogTrace("Invalid version: %s" % version)
         return
 
@@ -156,7 +160,7 @@ class SymbolicationRequest:
             return
           module = getModuleV2(*module)
         else:
-          assert version == 3
+          assert version == 3 or version == 4
           if len(module) != 2:
             LogTrace("Entry in memory map is not a 2 item list: " + str(module))
             return
@@ -168,6 +172,10 @@ class SymbolicationRequest:
         cleanMemoryMap.append(module)
 
       self.combinedMemoryMap = cleanMemoryMap
+      self.knownModules = [False] * len(self.combinedMemoryMap)
+
+      if version < 4:
+        self.includeKnownModulesInResponse = False
 
       # Check stack is well-formatted
       for stack in stacks:
@@ -197,12 +205,13 @@ class SymbolicationRequest:
       url = self.symFileManager.sOptions["remoteSymbolServer"]
       rawModules =  []
       moduleToIndex = {}
-      moduleCount = 0
-      for m in modules:
+      newIndexToOldIndex = {}
+      for moduleIndex, m in modules:
         l = [m.libName, m.breakpadId]
+        newModuleIndex = len(rawModules)
         rawModules.append(l)
-        moduleToIndex[m] = moduleCount
-        moduleCount += 1
+        moduleToIndex[m] = newModuleIndex
+        newIndexToOldIndex[newModuleIndex] = moduleIndex
 
       rawStack = []
       for entry in stack:
@@ -212,25 +221,45 @@ class SymbolicationRequest:
         newIndex = moduleToIndex[module]
         rawStack.append([newIndex, offset])
 
-      requestObj = { "symbolSources": self.symbolSources,
-                     "stacks": [rawStack], "memoryMap": rawModules,
-                     "forwarded": self.forwardCount + 1, "version": 3 }
-      requestJson = json.dumps(requestObj)
-      headers = { "Content-Type": "application/json" }
-      requestHandle = urllib2.Request(url, requestJson, headers)
-      response = urllib2.urlopen(requestHandle)
+      requestVersion = 4
+      while True:
+        requestObj = { "symbolSources": self.symbolSources,
+                       "stacks": [rawStack], "memoryMap": rawModules,
+                       "forwarded": self.forwardCount + 1, "version": requestVersion }
+        requestJson = json.dumps(requestObj)
+        headers = { "Content-Type": "application/json" }
+        requestHandle = urllib2.Request(url, requestJson, headers)
+        try:
+          response = urllib2.urlopen(requestHandle)
+        except Exception as e:
+          if requestVersion == 4:
+            # Try again with version 3
+            requestVersion = 3
+            continue
+          raise e
+        succeededVersion = requestVersion
+        break
+
     except Exception as e:
       LogError("Exception while forwarding request: " + str(e))
       return
 
     try:
-      responseJson = response.read()
+      responseJson = json.loads(response.read())
     except Exception as e:
       LogError("Exception while reading server response to forwarded request: " + str(e))
       return
 
     try:
-      responseSymbols = json.loads(responseJson)[0]
+      if succeededVersion == 4:
+        responseKnownModules = responseJson['knownModules']
+        for newIndex, known in enumerate(responseKnownModules):
+          if known and newIndex in newIndexToOldIndex:
+            self.knownModules[newIndexToOldIndex[newIndex]] = True
+
+        responseSymbols = responseJson['symbolicatedStacks'][0]
+      else:
+        responseSymbols = responseJson[0]
       if len(responseSymbols) != len(stack):
         LogError(str(len(responseSymbols)) + " symbols in response, " + str(len(stack)) + " PCs in request!")
         return
@@ -258,6 +287,14 @@ class SymbolicationRequest:
     unresolvedModules = []
     stack = self.stacks[stackNum]
 
+    for moduleIndex, module in enumerate(self.combinedMemoryMap):
+      if not self.symFileManager.GetLibSymbolMap(module.libName, module.breakpadId, self.symbolSources):
+        missingSymFiles.append((module.libName, module.breakpadId))
+        if shouldForwardRequests:
+          unresolvedModules.append((moduleIndex, module))
+      else:
+        self.knownModules[moduleIndex] = True
+
     for entry in stack:
       pcIndex += 1
       moduleIndex = entry[0]
@@ -267,7 +304,6 @@ class SymbolicationRequest:
         continue
       module = self.combinedMemoryMap[moduleIndex]
 
-      # Don't look for a missing lib multiple times in one request
       if (module.libName, module.breakpadId) in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
@@ -279,14 +315,7 @@ class SymbolicationRequest:
       libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
                                                          module.breakpadId,
                                                          self.symbolSources)
-      if libSymbolMap:
-        functionName = libSymbolMap.Lookup(offset)
-      else:
-        if shouldForwardRequests:
-          unresolvedIndexes.append(pcIndex)
-          unresolvedStack.append(entry)
-          unresolvedModules.append(module)
-        missingSymFiles.append((module.libName, module.breakpadId))
+      functionName = libSymbolMap.Lookup(offset)
 
       if functionName == None:
         functionName = hex(offset)
