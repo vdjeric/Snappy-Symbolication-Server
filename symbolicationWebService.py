@@ -36,20 +36,15 @@ gOptions = {
   "prefetchThreshold": 48,
   # Maximum number of library versions to pre-fetch per library
   "prefetchMaxSymbolsPerLib": 3,
-  # Default symbol lookup directories
-  "defaultApp": "FIREFOX",
-  "defaultOs": "WINDOWS",
-  # Paths to .SYM files, expressed internally as a mapping of app or platform names
-  # to directories
-  # Note: App & OS names from requests are converted to all-uppercase internally
-  "symbolPaths": {
+  # Paths to .SYM files
+  "symbolPaths": [
     # Location of Firefox library symbols
-    "FIREFOX": os.getcwd() + os.sep + "symbols_ffx" + os.sep,
+    os.path.join(os.getcwd(), "symbols_ffx"),
     # Location of Thunderbird library symbols
-    "THUNDERBIRD": os.getcwd() + os.sep + "symbols_tbrd" + os.sep,
+    os.path.join(os.getcwd(), "symbols_tbrd"),
     # Location of Windows library symbols
-    "WINDOWS": os.getcwd() + os.sep + "symbols_os" + os.sep
-  }
+    os.path.join(os.getcwd(), "symbols_os"),
+  ]
 }
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -167,27 +162,11 @@ def ReadConfigFile():
         return False
     gOptions[option] = value
 
-  # Get the "application -> path" mapping from the config file
+  # Get the list of symbol paths from the config file
   configPaths = configParser.items("SymbolPaths")
   if configPaths:
     # Drop defaults if config file entries exist
-    gOptions["symbolPaths"] = {}
-    # Convert path names to upper case
-    for (name, path) in configPaths:
-      gOptions["symbolPaths"][name.upper()] = path
-
-  # Convert to upper-case
-  gOptions["defaultApp"] = gOptions["defaultApp"].upper()
-  gOptions["defaultOs"] = gOptions["defaultOs"].upper()
-
-  # Check defaults are valid
-  if gOptions["defaultApp"] not in gOptions["symbolPaths"]:
-    LogError("Invalid defaultApp '" + gOptions["defaultApp"] + "', no corresponding path in [SymbolPaths] section.")
-    return False
-  if gOptions["defaultOs"] not in gOptions["symbolPaths"]:
-    LogError("Invalid defaultOs '" + gOptions["defaultOs"] + "', no corresponding path in [SymbolPaths] section.")
-    return False
-  
+    gOptions["symbolPaths"] = [path for name, path in configPaths]
 
   return True
 
@@ -202,9 +181,8 @@ def Main():
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(gOptions)
 
-  # Prefetch recent Firefox symbols + start the periodic prefetch callbacks
-  if gOptions["defaultApp"] == "FIREFOX":
-    gSymFileManager.PrefetchRecentSymbolFiles()
+  # Prefetch recent symbols + start the periodic prefetch callbacks
+  gSymFileManager.PrefetchRecentSymbolFiles()
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))
 

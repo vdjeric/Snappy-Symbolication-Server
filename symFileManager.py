@@ -39,7 +39,7 @@ class SymFileManager:
   def __init__(self, options):
     self.sOptions = options
 
-  def GetLibSymbolMap(self, libName, breakpadId, symbolSources):
+  def GetLibSymbolMap(self, libName, breakpadId):
     # Empty lib name means client couldn't associate frame with any lib
     if libName == "":
       return None
@@ -63,17 +63,17 @@ class SymFileManager:
       else:
         symFileName = libName + ".sym"
 
-      pathSuffix = os.sep + libName + os.sep + breakpadId + os.sep + symFileName
+      pathSuffix = os.path.join(libName, breakpadId, symFileName)
 
       # Look in the symbol dirs for this .sym file
-      for source in symbolSources:
-        path = self.sOptions["symbolPaths"][source] + pathSuffix
+      for symbolPath in self.sOptions["symbolPaths"]:
+        path = os.path.join(symbolPath, pathSuffix)
         libSymbolMap = self.FetchSymbolsFromFile(path)
         if libSymbolMap:
           break
 
       if not libSymbolMap:
-        LogTrace("No matching sym files, tried " + str(symbolSources))
+        LogTrace("No matching sym files, tried " + str(self.sOptions["symbolPaths"]))
         return None
 
       LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
@@ -153,12 +153,12 @@ class SymFileManager:
     symDirsToInspect = {}
     for pdbName in PREFETCHED_LIBS:
       symDirsToInspect[pdbName] = []
-      topLibPath = self.sOptions['symbolPaths']['FIREFOX'] + os.sep + pdbName
+      topLibPath = os.path.join(self.sOptions['symbolPaths'][0], pdbName)
 
       try:
         symbolDirs = os.listdir(topLibPath)
         for symbolDir in symbolDirs:
-          candidatePath = topLibPath + os.sep + symbolDir
+          candidatePath = os.path.join(topLibPath, symbolDir)
           mtime = os.path.getmtime(candidatePath)
           if mtime > thresholdTime:
             symDirsToInspect[pdbName].append((mtime, candidatePath))
@@ -193,7 +193,7 @@ class SymFileManager:
 
       for (mtime, symbolDirPath) in symDirsToInspect[pdbName]:
         pdbId = os.path.basename(symbolDirPath)
-        symbolFilePath = symbolDirPath + os.sep + symFileName
+        symbolFilePath = os.path.join(symbolDirPath, symFileName)
         symbolInfo = self.FetchSymbolsFromFile(symbolFilePath)
         if symbolInfo:
           # Stop if the prefetched items are bigger than the cache
