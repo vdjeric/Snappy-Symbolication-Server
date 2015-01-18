@@ -6,9 +6,6 @@ import threading
 import time
 from bisect import bisect
 
-# Libraries to keep prefetched
-PREFETCHED_LIBS = [ "xul.pdb", "firefox.pdb" ]
-
 class SymbolInfo:
   def __init__(self, addressMap):
     self.sortedAddresses = sorted(addressMap.keys())
@@ -34,7 +31,6 @@ class SymFileManager:
   sMruSymbols = []
 
   sOptions = {}
-  sCallbackTimer = None
 
   def __init__(self, options):
     self.sOptions = options
@@ -135,103 +131,8 @@ class SymFileManager:
 
     return SymbolInfo(symbolMap)
 
-  def StopPrefetchTimer(self):
-    if self.sCallbackTimer:
-      self.sCallbackTimer.cancel()
-      self.sCallbackTimer = None
-
   def PrefetchRecentSymbolFiles(self):
-    global PREFETCHED_LIBS
-
-    LogMessage("Prefetching recent symbol files")
-    # Schedule next timer callback
-    interval = self.sOptions['prefetchInterval'] * 60 * 60
-    self.sCallbackTimer = threading.Timer(interval, self.PrefetchRecentSymbolFiles)
-    self.sCallbackTimer.start()
-
-    thresholdTime = time.time() - self.sOptions['prefetchThreshold'] * 60 * 60
-    symDirsToInspect = {}
-    for pdbName in PREFETCHED_LIBS:
-      symDirsToInspect[pdbName] = []
-      topLibPath = os.path.join(self.sOptions['symbolPaths'][0], pdbName)
-
-      try:
-        symbolDirs = os.listdir(topLibPath)
-        for symbolDir in symbolDirs:
-          candidatePath = os.path.join(topLibPath, symbolDir)
-          mtime = os.path.getmtime(candidatePath)
-          if mtime > thresholdTime:
-            symDirsToInspect[pdbName].append((mtime, candidatePath))
-      except Exception as e:
-        LogError("Error while pre-fetching: " + str(e))
-
-      LogMessage("Found " + str(len(symDirsToInspect[pdbName])) + " new " + pdbName + " recent dirs")
-
-      # Only prefetch the most recent N entries
-      symDirsToInspect[pdbName].sort(reverse=True)
-      symDirsToInspect[pdbName] = symDirsToInspect[pdbName][:self.sOptions['prefetchMaxSymbolsPerLib']]
-
-    # Don't fetch symbols already in cache.
-    # Ideally, mutex would be held from check to insert in self.sCache,
-    # but we don't want to hold the lock during I/O. This won't cause inconsistencies.
-    self.sCacheLock.acquire()
-    try:
-      for pdbName in symDirsToInspect:
-        for (mtime, symbolDirPath) in symDirsToInspect[pdbName]:
-          pdbId = os.path.basename(symbolDirPath)
-          if pdbName in self.sCache and pdbId in self.sCache[pdbName]:
-            symDirsToInspect[pdbName].remove((mtime, symbolDirPath))
-    finally:
-      self.sCacheLock.release()
-
-    # Read all new symbol files in at once
-    fetchedSymbols = {}
-    fetchedCount = 0
-    for pdbName in symDirsToInspect:
-      # The corresponding symbol file name ends with .sym
-      symFileName = re.sub(r"\.[^\.]+$", ".sym", pdbName)
-
-      for (mtime, symbolDirPath) in symDirsToInspect[pdbName]:
-        pdbId = os.path.basename(symbolDirPath)
-        symbolFilePath = os.path.join(symbolDirPath, symFileName)
-        symbolInfo = self.FetchSymbolsFromFile(symbolFilePath)
-        if symbolInfo:
-          # Stop if the prefetched items are bigger than the cache
-          if fetchedCount + symbolInfo.GetEntryCount() > self.sOptions["maxCacheEntries"]:
-            #print "Can't fit " + pdbName + "/" + pdbId
-            break
-          fetchedSymbols[(pdbName, pdbId)] = symbolInfo
-          fetchedCount += symbolInfo.GetEntryCount()
-          #print "fetchedCount = " + str(fetchedCount) + "  after " + pdbName + "/" + pdbId
-        else:
-          LogError("Couldn't fetch .sym file symbols for " + symbolFilePath)
-          continue
-
-    # Insert new symbols into global symbol cache
-    self.sCacheLock.acquire()
-    try:
-      # Make room for the new symbols
-      self.MaybeEvict(fetchedCount)
-
-      for (pdbName, pdbId) in fetchedSymbols:
-        if pdbName not in self.sCache:
-          self.sCache[pdbName] = {}
-
-        if pdbId in self.sCache[pdbName]:
-          #print pdbName, "version", pdbId, "already in cache"
-          continue
-
-        newSymbolFile = fetchedSymbols[(pdbName, pdbId)]
-        self.sCache[pdbName][pdbId] = newSymbolFile
-        self.sCacheCount += newSymbolFile.GetEntryCount()
-        #print "Cache has " + str(self.sCacheCount) + " entries after inserting prefetched " + pdbName + "/" + pdbId
-
-        # Move new symbols to front of MRU list to give them a chance
-        self.UpdateMruList(pdbName, pdbId)
-
-    finally:
-      self.sCacheLock.release()
-
+    # TODO: reimplement this
     LogMessage("Finished prefetching recent symbol files")
 
   def UpdateMruList(self, pdbName, pdbId):

@@ -30,12 +30,6 @@ gOptions = {
   # Maximum number of symbol files to keep in memory
   # "maxCacheEntries": 10 * 1000 * 1000,
   "maxCacheEntries": 100,
-  # Frequency of checking for recent symbols to cache (in hours)
-  "prefetchInterval": 12,
-  # Oldest file age to prefetch (in hours)
-  "prefetchThreshold": 48,
-  # Maximum number of library versions to pre-fetch per library
-  "prefetchMaxSymbolsPerLib": 3,
   # Paths to .SYM files
   "symbolPaths": [
     # Location of Firefox library symbols
@@ -181,7 +175,7 @@ def Main():
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(gOptions)
 
-  # Prefetch recent symbols + start the periodic prefetch callbacks
+  # Prefetch recent symbols
   gSymFileManager.PrefetchRecentSymbolFiles()
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))
@@ -194,8 +188,6 @@ def Main():
     httpd.serve_forever()
   except KeyboardInterrupt:
     LogMessage("Received SIGINT, stopping...")
-
-  gSymFileManager.StopPrefetchTimer()
 
   httpd.server_close()
   LogMessage("Server stopped - " + gOptions['hostname'] + ":" + str(gOptions['portNumber']))
