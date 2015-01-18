@@ -42,6 +42,10 @@ gOptions = {
     os.path.join(os.getcwd(), "symbols_tbrd"),
     # Location of Windows library symbols
     os.path.join(os.getcwd(), "symbols_os"),
+  ],
+  # URLs to symbol stores
+  "symbolURLs": [
+    'https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/',
   ]
 }
 
@@ -143,8 +147,8 @@ def ReadConfigFile():
       return False
 
   # Check for section names
-  if set(configParser.sections()) != set(["General", "SymbolPaths"]):
-    LogError("Config file should be made up of two sections: 'General' and 'SymbolPaths'")
+  if set(configParser.sections()) != set(["General", "SymbolPaths", "SymbolURLs"]):
+    LogError("Config file should be made up of three sections: 'General', 'SymbolPaths' and 'SymbolURLs'")
     return False
 
   generalSectionOptions = configParser.items("General")
@@ -160,11 +164,16 @@ def ReadConfigFile():
         return False
     gOptions[option] = value
 
-  # Get the list of symbol paths from the config file
+  # Get the list of symbol paths and URLs from the config file
   configPaths = configParser.items("SymbolPaths")
   if configPaths:
     # Drop defaults if config file entries exist
     gOptions["symbolPaths"] = [path for name, path in configPaths]
+
+  # Get the list of symbol paths from the config file
+  configURLs = configParser.items("SymbolURLs")
+  if configURLs:
+    gOptions["symbolURLs"] = [url for name, url in configURLs]
 
   return True
 

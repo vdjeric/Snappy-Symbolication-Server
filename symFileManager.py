@@ -1,11 +1,14 @@
 from symLogging import LogTrace, LogError, LogMessage
 
+import contextlib
 import json
 import os
 import re
 import shutil
 import threading
 import time
+import urllib2
+import urlparse
 from bisect import bisect
 from tempfile import NamedTemporaryFile
 
@@ -72,8 +75,16 @@ class SymFileManager:
         if libSymbolMap:
           break
 
+      # If not in symbolPaths try URLs
       if not libSymbolMap:
-        LogTrace("No matching sym files, tried " + str(self.sOptions["symbolPaths"]))
+        for symbolURL in self.sOptions["symbolURLs"]:
+          url = urlparse.urljoin(symbolURL, pathSuffix)
+          libSymbolMap = self.FetchSymbolsFromURL(url)
+          if libSymbolMap:
+            break
+
+      if not libSymbolMap:
+        LogTrace("No matching sym files, tried paths: %s and URLs: %s" % (", ".join(self.sOptions["symbolPaths"]), ", ".join(self.sOptions["symbolURLs"])))
         return None
 
       LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
@@ -93,13 +104,25 @@ class SymFileManager:
 
   def FetchSymbolsFromFile(self, path):
     try:
-      symFile = open(path, "r")
+      with open(path, "r") as symFile:
+        LogMessage("Parsing SYM file at " + path)
+        return self.FetchSymbolsFromFileObj(symFile)
     except Exception as e:
       LogTrace("Error opening file " + path + ": " + str(e))
       return None
 
-    LogMessage("Parsing SYM file at " + path)
+  def FetchSymbolsFromURL(self, url):
+    try:
+      with contextlib.closing(urllib2.urlopen(url)) as request:
+        if request.getcode() != 200:
+          return None
+        LogMessage("Parsing SYM file at " + url)
+        return self.FetchSymbolsFromFileObj(request)
+    except Exception as e:
+      LogTrace("Error opening URL " + url + ": " + str(e))
+      return None
 
+  def FetchSymbolsFromFileObj(self, symFile):
     try:
       symbolMap = {}
       lineNum = 0
