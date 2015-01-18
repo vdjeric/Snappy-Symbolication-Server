@@ -1,10 +1,13 @@
 from symLogging import LogTrace, LogError, LogMessage
 
+import json
 import os
 import re
+import shutil
 import threading
 import time
 from bisect import bisect
+from tempfile import NamedTemporaryFile
 
 class SymbolInfo:
   def __init__(self, addressMap):
@@ -29,6 +32,7 @@ class SymFileManager:
   sCacheCount = 0
   sCacheLock = threading.Lock()
   sMruSymbols = []
+  sUpdateMRUFile = True
 
   sOptions = {}
 
@@ -132,14 +136,31 @@ class SymFileManager:
     return SymbolInfo(symbolMap)
 
   def PrefetchRecentSymbolFiles(self):
-    # TODO: reimplement this
-    LogMessage("Finished prefetching recent symbol files")
+    try:
+      mruSymbols = []
+      with open(self.sOptions["mruSymbolStateFile"], "rb") as f:
+        mruSymbols = json.load(f)["symbols"]
+      LogMessage("Going to prefetch %d recent symbol files" % len(mruSymbols))
+      self.sUpdateMRUFile = False
+      for libName, breakpadId in mruSymbols:
+        self.GetLibSymbolMap(libName, breakpadId)
+      LogMessage("Finished prefetching recent symbol files")
+    except IOError:
+      LogError("Error reading MRU symbols state file")
+    finally:
+      self.sUpdateMRUFile = True
 
   def UpdateMruList(self, pdbName, pdbId):
     libId = (pdbName, pdbId)
     if libId in self.sMruSymbols:
       self.sMruSymbols.remove(libId)
     self.sMruSymbols.insert(0, libId)
+    if self.sUpdateMRUFile:
+      # Update the state file
+      temp = NamedTemporaryFile(delete=False)
+      json.dump({"symbols": list(reversed(self.sMruSymbols[:self.sOptions["maxMRUSymbolsPersist"]]))}, temp)
+      temp.close()
+      shutil.move(temp.name, self.sOptions["mruSymbolStateFile"])
 
   def MaybeEvict(self, freeEntriesNeeded):
     maxCacheSize = self.sOptions["maxCacheEntries"]

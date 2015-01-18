@@ -30,6 +30,10 @@ gOptions = {
   # Maximum number of symbol files to keep in memory
   # "maxCacheEntries": 10 * 1000 * 1000,
   "maxCacheEntries": 100,
+  # File in which to persist the list of most-recently-used symbols.
+  "mruSymbolStateFile": "/tmp/snappy-mru-symbols.json",
+  # Maximum number of symbol files to persist in the state file between runs.
+  "maxMRUSymbolsPersist": 10,
   # Paths to .SYM files
   "symbolPaths": [
     # Location of Firefox library symbols
