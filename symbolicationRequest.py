@@ -4,7 +4,6 @@ import symFileManager
 import re
 import json
 import urllib2
-from bisect import bisect
 
 # Precompiled regex for validating lib names
 gLibNameRE = re.compile("[0-9a-zA-Z_+\-\.]*$") # Empty lib name means client couldn't associate frame with any lib
@@ -65,7 +64,6 @@ class SymbolicationRequest:
     self.combinedMemoryMap = []
     self.knownModules = []
     self.includeKnownModulesInResponse = True
-    self.symbolSources = []
     self.ParseRequests(rawRequests)
 
   def Reset(self):
@@ -100,37 +98,6 @@ class SymbolicationRequest:
           LogTrace("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
           return
         self.forwardCount = rawRequests["forwarded"]
-
-      # Only used for compatibility with older clients.
-      # TODO: Remove after June 2013.
-      if "appName" in rawRequests:
-        requestingApp = rawRequests["appName"].upper()
-        if requestingApp in self.symFileManager.sOptions["symbolPaths"]:
-          self.symbolSources.append(requestingApp)
-
-      # Ditto
-      if "osName" in rawRequests:
-        requestingOs = rawRequests["osName"].upper()
-        if requestingOs in self.symFileManager.sOptions["symbolPaths"]:
-          self.symbolSources.append(requestingOs)
-
-      # Client specifies which sets of symbols should be used
-      if "symbolSources" in rawRequests:
-        try:
-          sourceList = [x.upper() for x in rawRequests["symbolSources"]]
-          for source in sourceList:
-            if source in self.symFileManager.sOptions["symbolPaths"]:
-              self.symbolSources.append(source)
-            else:
-              LogTrace("Unrecognized symbol source: " + source)
-              continue
-        except:
-          self.symbolSources = []
-          pass
-
-      if not self.symbolSources:
-        self.symbolSources.append(self.symFileManager.sOptions["defaultApp"])
-        self.symbolSources.append(self.symFileManager.sOptions["defaultOs"])
 
       if "memoryMap" not in rawRequests:
         LogTrace("Request is missing 'memoryMap' field")
@@ -223,9 +190,10 @@ class SymbolicationRequest:
 
       requestVersion = 4
       while True:
-        requestObj = { "symbolSources": self.symbolSources,
-                       "stacks": [rawStack], "memoryMap": rawModules,
-                       "forwarded": self.forwardCount + 1, "version": requestVersion }
+        requestObj = {
+          "stacks": [rawStack], "memoryMap": rawModules,
+          "forwarded": self.forwardCount + 1, "version": requestVersion
+        }
         requestJson = json.dumps(requestObj)
         headers = { "Content-Type": "application/json" }
         requestHandle = urllib2.Request(url, requestJson, headers)
@@ -288,7 +256,7 @@ class SymbolicationRequest:
     stack = self.stacks[stackNum]
 
     for moduleIndex, module in enumerate(self.combinedMemoryMap):
-      if not self.symFileManager.GetLibSymbolMap(module.libName, module.breakpadId, self.symbolSources):
+      if not self.symFileManager.GetLibSymbolMap(module.libName, module.breakpadId):
         missingSymFiles.append((module.libName, module.breakpadId))
         if shouldForwardRequests:
           unresolvedModules.append((moduleIndex, module))
@@ -313,8 +281,7 @@ class SymbolicationRequest:
 
       functionName = None
       libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
-                                                         module.breakpadId,
-                                                         self.symbolSources)
+                                                         module.breakpadId)
       functionName = libSymbolMap.Lookup(offset)
 
       if functionName == None:

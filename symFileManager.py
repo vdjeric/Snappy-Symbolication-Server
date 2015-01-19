@@ -1,13 +1,16 @@
 from symLogging import LogTrace, LogError, LogMessage
 
+import contextlib
+import json
 import os
 import re
+import shutil
 import threading
 import time
+import urllib2
+import urlparse
 from bisect import bisect
-
-# Libraries to keep prefetched
-PREFETCHED_LIBS = [ "xul.pdb", "firefox.pdb" ]
+from tempfile import NamedTemporaryFile
 
 class SymbolInfo:
   def __init__(self, addressMap):
@@ -32,14 +35,14 @@ class SymFileManager:
   sCacheCount = 0
   sCacheLock = threading.Lock()
   sMruSymbols = []
+  sUpdateMRUFile = True
 
   sOptions = {}
-  sCallbackTimer = None
 
   def __init__(self, options):
     self.sOptions = options
 
-  def GetLibSymbolMap(self, libName, breakpadId, symbolSources):
+  def GetLibSymbolMap(self, libName, breakpadId):
     # Empty lib name means client couldn't associate frame with any lib
     if libName == "":
       return None
@@ -63,17 +66,25 @@ class SymFileManager:
       else:
         symFileName = libName + ".sym"
 
-      pathSuffix = os.sep + libName + os.sep + breakpadId + os.sep + symFileName
+      pathSuffix = os.path.join(libName, breakpadId, symFileName)
 
       # Look in the symbol dirs for this .sym file
-      for source in symbolSources:
-        path = self.sOptions["symbolPaths"][source] + pathSuffix
+      for symbolPath in self.sOptions["symbolPaths"]:
+        path = os.path.join(symbolPath, pathSuffix)
         libSymbolMap = self.FetchSymbolsFromFile(path)
         if libSymbolMap:
           break
 
+      # If not in symbolPaths try URLs
       if not libSymbolMap:
-        LogTrace("No matching sym files, tried " + str(symbolSources))
+        for symbolURL in self.sOptions["symbolURLs"]:
+          url = urlparse.urljoin(symbolURL, pathSuffix)
+          libSymbolMap = self.FetchSymbolsFromURL(url)
+          if libSymbolMap:
+            break
+
+      if not libSymbolMap:
+        LogTrace("No matching sym files, tried paths: %s and URLs: %s" % (", ".join(self.sOptions["symbolPaths"]), ", ".join(self.sOptions["symbolURLs"])))
         return None
 
       LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
@@ -93,13 +104,25 @@ class SymFileManager:
 
   def FetchSymbolsFromFile(self, path):
     try:
-      symFile = open(path, "r")
+      with open(path, "r") as symFile:
+        LogMessage("Parsing SYM file at " + path)
+        return self.FetchSymbolsFromFileObj(symFile)
     except Exception as e:
       LogTrace("Error opening file " + path + ": " + str(e))
       return None
 
-    LogMessage("Parsing SYM file at " + path)
+  def FetchSymbolsFromURL(self, url):
+    try:
+      with contextlib.closing(urllib2.urlopen(url)) as request:
+        if request.getcode() != 200:
+          return None
+        LogMessage("Parsing SYM file at " + url)
+        return self.FetchSymbolsFromFileObj(request)
+    except Exception as e:
+      LogTrace("Error opening URL " + url + ": " + str(e))
+      return None
 
+  def FetchSymbolsFromFileObj(self, symFile):
     try:
       symbolMap = {}
       lineNum = 0
@@ -135,110 +158,32 @@ class SymFileManager:
 
     return SymbolInfo(symbolMap)
 
-  def StopPrefetchTimer(self):
-    if self.sCallbackTimer:
-      self.sCallbackTimer.cancel()
-      self.sCallbackTimer = None
-
   def PrefetchRecentSymbolFiles(self):
-    global PREFETCHED_LIBS
-
-    LogMessage("Prefetching recent symbol files")
-    # Schedule next timer callback
-    interval = self.sOptions['prefetchInterval'] * 60 * 60
-    self.sCallbackTimer = threading.Timer(interval, self.PrefetchRecentSymbolFiles)
-    self.sCallbackTimer.start()
-
-    thresholdTime = time.time() - self.sOptions['prefetchThreshold'] * 60 * 60
-    symDirsToInspect = {}
-    for pdbName in PREFETCHED_LIBS:
-      symDirsToInspect[pdbName] = []
-      topLibPath = self.sOptions['symbolPaths']['FIREFOX'] + os.sep + pdbName
-
-      try:
-        symbolDirs = os.listdir(topLibPath)
-        for symbolDir in symbolDirs:
-          candidatePath = topLibPath + os.sep + symbolDir
-          mtime = os.path.getmtime(candidatePath)
-          if mtime > thresholdTime:
-            symDirsToInspect[pdbName].append((mtime, candidatePath))
-      except Exception as e:
-        LogError("Error while pre-fetching: " + str(e))
-
-      LogMessage("Found " + str(len(symDirsToInspect[pdbName])) + " new " + pdbName + " recent dirs")
-
-      # Only prefetch the most recent N entries
-      symDirsToInspect[pdbName].sort(reverse=True)
-      symDirsToInspect[pdbName] = symDirsToInspect[pdbName][:self.sOptions['prefetchMaxSymbolsPerLib']]
-
-    # Don't fetch symbols already in cache.
-    # Ideally, mutex would be held from check to insert in self.sCache,
-    # but we don't want to hold the lock during I/O. This won't cause inconsistencies.
-    self.sCacheLock.acquire()
     try:
-      for pdbName in symDirsToInspect:
-        for (mtime, symbolDirPath) in symDirsToInspect[pdbName]:
-          pdbId = os.path.basename(symbolDirPath)
-          if pdbName in self.sCache and pdbId in self.sCache[pdbName]:
-            symDirsToInspect[pdbName].remove((mtime, symbolDirPath))
+      mruSymbols = []
+      with open(self.sOptions["mruSymbolStateFile"], "rb") as f:
+        mruSymbols = json.load(f)["symbols"]
+      LogMessage("Going to prefetch %d recent symbol files" % len(mruSymbols))
+      self.sUpdateMRUFile = False
+      for libName, breakpadId in mruSymbols:
+        self.GetLibSymbolMap(libName, breakpadId)
+      LogMessage("Finished prefetching recent symbol files")
+    except IOError:
+      LogError("Error reading MRU symbols state file")
     finally:
-      self.sCacheLock.release()
-
-    # Read all new symbol files in at once
-    fetchedSymbols = {}
-    fetchedCount = 0
-    for pdbName in symDirsToInspect:
-      # The corresponding symbol file name ends with .sym
-      symFileName = re.sub(r"\.[^\.]+$", ".sym", pdbName)
-
-      for (mtime, symbolDirPath) in symDirsToInspect[pdbName]:
-        pdbId = os.path.basename(symbolDirPath)
-        symbolFilePath = symbolDirPath + os.sep + symFileName
-        symbolInfo = self.FetchSymbolsFromFile(symbolFilePath)
-        if symbolInfo:
-          # Stop if the prefetched items are bigger than the cache
-          if fetchedCount + symbolInfo.GetEntryCount() > self.sOptions["maxCacheEntries"]:
-            #print "Can't fit " + pdbName + "/" + pdbId
-            break
-          fetchedSymbols[(pdbName, pdbId)] = symbolInfo
-          fetchedCount += symbolInfo.GetEntryCount()
-          #print "fetchedCount = " + str(fetchedCount) + "  after " + pdbName + "/" + pdbId
-        else:
-          LogError("Couldn't fetch .sym file symbols for " + symbolFilePath)
-          continue
-
-    # Insert new symbols into global symbol cache
-    self.sCacheLock.acquire()
-    try:
-      # Make room for the new symbols
-      self.MaybeEvict(fetchedCount)
-
-      for (pdbName, pdbId) in fetchedSymbols:
-        if pdbName not in self.sCache:
-          self.sCache[pdbName] = {}
-
-        if pdbId in self.sCache[pdbName]:
-          #print pdbName, "version", pdbId, "already in cache"
-          continue
-
-        newSymbolFile = fetchedSymbols[(pdbName, pdbId)]
-        self.sCache[pdbName][pdbId] = newSymbolFile
-        self.sCacheCount += newSymbolFile.GetEntryCount()
-        #print "Cache has " + str(self.sCacheCount) + " entries after inserting prefetched " + pdbName + "/" + pdbId
-
-        # Move new symbols to front of MRU list to give them a chance
-        self.UpdateMruList(pdbName, pdbId)
-
-    finally:
-      self.sCacheLock.release()
-
-    LogMessage("Finished prefetching recent symbol files")
+      self.sUpdateMRUFile = True
 
   def UpdateMruList(self, pdbName, pdbId):
     libId = (pdbName, pdbId)
     if libId in self.sMruSymbols:
       self.sMruSymbols.remove(libId)
     self.sMruSymbols.insert(0, libId)
+    if self.sUpdateMRUFile:
+      # Update the state file
+      temp = NamedTemporaryFile(delete=False)
+      json.dump({"symbols": list(reversed(self.sMruSymbols[:self.sOptions["maxMRUSymbolsPersist"]]))}, temp)
+      temp.close()
+      shutil.move(temp.name, self.sOptions["mruSymbolStateFile"])
 
   def MaybeEvict(self, freeEntriesNeeded):
     maxCacheSize = self.sOptions["maxCacheEntries"]
