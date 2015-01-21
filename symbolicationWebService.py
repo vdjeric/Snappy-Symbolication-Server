@@ -36,12 +36,8 @@ gOptions = {
   "maxMRUSymbolsPersist": 10,
   # Paths to .SYM files
   "symbolPaths": [
-    # Location of Firefox library symbols
-    os.path.join(os.getcwd(), "symbols_ffx"),
-    # Location of Thunderbird library symbols
-    os.path.join(os.getcwd(), "symbols_tbrd"),
-    # Location of Windows library symbols
-    os.path.join(os.getcwd(), "symbols_os"),
+    # Default to empty so users don't have to list anything in their config
+    # file to override the defaults.
   ],
   # URLs to symbol stores
   "symbolURLs": [
