@@ -162,11 +162,13 @@ class SymFileManager:
     try:
       mruSymbols = []
       with open(self.sOptions["mruSymbolStateFile"], "rb") as f:
-        mruSymbols = json.load(f)["symbols"]
+        mruSymbols = json.load(f)["symbols"][:self.sOptions["maxMRUSymbolsPersist"]]
       LogMessage("Going to prefetch %d recent symbol files" % len(mruSymbols))
       self.sUpdateMRUFile = False
       for libName, breakpadId in mruSymbols:
-        self.GetLibSymbolMap(libName, breakpadId)
+        sym = self.GetLibSymbolMap(libName, breakpadId)
+        if sym is None:
+          LogTrace("Failed to prefetch symbols for (%s,%s)" % (libName, breakpadId))
       LogMessage("Finished prefetching recent symbol files")
     except IOError:
       LogError("Error reading MRU symbols state file")
