@@ -1,0 +1,13 @@
+[Unit]
+Description=Snappy Symbolication Server
+ 
+[Service]
+Type=simple
+User=nobody
+Group=nobody
+EnvironmentFile=-/etc/sysconfig/mozilla-snappy
+ExecStart=/usr/bin/symbolicationWebService.py $CMD_OPTS
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
