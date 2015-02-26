@@ -11,4 +11,4 @@ cp ./SPECS/mozilla-snappy.spec $HOME/rpmbuild/SPECS/
 cp ./SOURCES/mozilla-snappy.* $HOME/rpmbuild/SOURCES/
 cp ../sample.ini $HOME/rpmbuild/SOURCES/mozilla-snappy.ini
 
-rpmbuild -ba $HOME/rpmbuild/SPECS/mozilla-snappy.spec
+rpmbuild --target=noarch -ba $HOME/rpmbuild/SPECS/mozilla-snappy.spec
