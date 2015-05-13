@@ -67,6 +67,7 @@ class SymFileManager:
         symFileName = libName + ".sym"
 
       pathSuffix = os.path.join(libName, breakpadId, symFileName)
+      urlSuffix = "/".join([libName, breakpadId, symFileName])
 
       # Look in the symbol dirs for this .sym file
       for symbolPath in self.sOptions["symbolPaths"]:
@@ -78,7 +79,7 @@ class SymFileManager:
       # If not in symbolPaths try URLs
       if not libSymbolMap:
         for symbolURL in self.sOptions["symbolURLs"]:
-          url = urlparse.urljoin(symbolURL, pathSuffix)
+          url = urlparse.urljoin(symbolURL, urlSuffix)
           libSymbolMap = self.FetchSymbolsFromURL(url)
           if libSymbolMap:
             break

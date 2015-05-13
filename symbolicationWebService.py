@@ -121,7 +121,7 @@ class RequestHandler(BaseHTTPRequestHandler):
       LogTrace("Response: " + json.dumps(response))
       self.wfile.write(json.dumps(response))
     except Exception as e:
-      LogTrace("Exception in do_POST: " + str(e))
+      LogError("Exception in do_POST: " + str(e))
 
 def ReadConfigFile():
   configFileData = []
