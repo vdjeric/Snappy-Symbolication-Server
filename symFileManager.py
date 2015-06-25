@@ -1,4 +1,4 @@
-from symLogging import LogTrace, LogError, LogMessage
+from symLogging import LogTrace, LogError, LogMessage, CheckDebug
 
 import contextlib
 import json
@@ -43,6 +43,8 @@ class SymFileManager:
     self.sOptions = options
 
   def GetLibSymbolMap(self, libName, breakpadId):
+    CheckDebug()
+
     # Empty lib name means client couldn't associate frame with any lib
     if libName == "":
       return None

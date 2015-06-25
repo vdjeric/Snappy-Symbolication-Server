@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled
+from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled, SetDebug
 from symFileManager import SymFileManager
 from symbolicationRequest import SymbolicationRequest
 
@@ -72,6 +72,19 @@ class RequestHandler(BaseHTTPRequestHandler):
     LogTrace("Received request: " + self.path + " on thread " + threading.currentThread().getName())
 
     try:
+      clientIP = self.client_address[0]
+      if clientIP == "127.0.0.1":
+        path = self.path.lower()
+        if path == "/debug" or path == "/nodebug":
+          SetDebug(path == "/debug")
+          self.sendHeaders(200)
+          return
+    except Exception as e:
+      LogTrace("Exception in do_POST debug check: " + e)
+      return
+
+    try:
+      CheckDebug()
       length = int(self.headers["Content-Length"])
       # Read in the request body without blocking
       self.connection.settimeout(SOCKET_READ_TIMEOUT)
@@ -83,6 +96,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         # This could be a broken connection, writing an error message into it could be a bad idea
         # See http://bugs.python.org/issue14574
         LogTrace("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
+        return
+
+      # vdjeric: temporary hack to stop a spammy request
+      if "\"Bolt\"" in requestBody:
+        self.sendHeaders(400)
         return
 
       LogTrace("Request body: " + requestBody)

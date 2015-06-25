@@ -1,4 +1,4 @@
-from symLogging import LogTrace, LogError, LogMessage
+from symLogging import LogTrace, LogError, LogMessage, CheckDebug
 import symFileManager
 
 import re
