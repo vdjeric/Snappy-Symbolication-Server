@@ -175,6 +175,8 @@ class SymFileManager:
       LogMessage("Finished prefetching recent symbol files")
     except IOError:
       LogError("Error reading MRU symbols state file")
+    except ValueError:
+      LogError("Error parsing MRU symbols state file")
     finally:
       self.sUpdateMRUFile = True
 

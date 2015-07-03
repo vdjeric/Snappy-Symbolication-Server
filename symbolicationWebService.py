@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled, SetDebug
+from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled, SetDebug, CheckDebug
 from symFileManager import SymFileManager
 from symbolicationRequest import SymbolicationRequest
 
