@@ -1,4 +1,4 @@
-from symLogging import LogTrace, LogError, LogMessage, CheckDebug
+from symLogging import LogDebug, LogError, LogMessage, CheckDebug
 import symFileManager
 
 import re
@@ -27,31 +27,31 @@ def getModuleV2(libName, pdbAge, pdbSig, pdbName):
     elif gPdbSigRE2.match(pdbSig):
       pdbSig = pdbSig.upper()
     else:
-      LogTrace("Bad PDB signature: " + pdbSig)
+      LogDebug("Bad PDB signature: " + pdbSig)
       return None
   else:
-    LogTrace("Bad PDB signature: " + str(pdbSig))
+    LogDebug("Bad PDB signature: " + str(pdbSig))
     return None
 
   if isinstance(pdbAge, basestring):
     pdbAge = int(pdbAge)
   if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
-    LogTrace("Bad PDB age: " + str(pdbAge))
+    LogDebug("Bad PDB age: " + str(pdbAge))
     return None
   pdbAge = (hex(pdbAge)[2:]).lower()
 
   if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
-    LogTrace("Bad PDB name: " + str(pdbName))
+    LogDebug("Bad PDB name: " + str(pdbName))
     return None
   return ModuleV3(pdbName, pdbSig + pdbAge)
 
 def getModuleV3(libName, breakpadId):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
-    LogTrace("Bad library name: " + str(libName))
+    LogDebug("Bad library name: " + str(libName))
     return None
 
   if not isinstance(breakpadId, basestring):
-    LogTrace("Bad breakpad id: " + str(breakpadId))
+    LogDebug("Bad breakpad id: " + str(breakpadId))
     return None
 
   return ModuleV3(libName, breakpadId)
@@ -82,54 +82,54 @@ class SymbolicationRequest:
 
     try:
       if not isinstance(rawRequests, dict):
-        LogTrace("Request is not a dictionary")
+        LogDebug("Request is not a dictionary")
         return
 
       if "version" not in rawRequests:
-        LogTrace("Request is missing 'version' field")
+        LogDebug("Request is missing 'version' field")
         return
       version = rawRequests["version"]
       if version != 2 and version != 3 and version != 4:
-        LogTrace("Invalid version: %s" % version)
+        LogDebug("Invalid version: %s" % version)
         return
 
       if "forwarded" in rawRequests:
         if not isinstance(rawRequests["forwarded"], (int, long)):
-          LogTrace("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
+          LogDebug("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
           return
         self.forwardCount = rawRequests["forwarded"]
 
       if "memoryMap" not in rawRequests:
-        LogTrace("Request is missing 'memoryMap' field")
+        LogDebug("Request is missing 'memoryMap' field")
         return
       memoryMap = rawRequests["memoryMap"]
       if not isinstance(memoryMap, list):
-        LogTrace("'memoryMap' field in request is not a list")
+        LogDebug("'memoryMap' field in request is not a list")
 
       if "stacks" not in rawRequests:
-        LogTrace("Request is missing 'stacks' field")
+        LogDebug("Request is missing 'stacks' field")
         return
       stacks = rawRequests["stacks"]
       if not isinstance(stacks, list):
-        LogTrace("'stacks' field in request is not a list")
+        LogDebug("'stacks' field in request is not a list")
         return
 
       # Check memory map is well-formatted
       cleanMemoryMap = []
       for module in memoryMap:
         if not isinstance(module, list):
-          LogTrace("Entry in memory map is not a list: " + str(module))
+          LogDebug("Entry in memory map is not a list: " + str(module))
           return
 
         if version == 2:
           if len(module) != 4:
-            LogTrace("Entry in memory map is not a 4 item list: " + str(module))
+            LogDebug("Entry in memory map is not a 4 item list: " + str(module))
             return
           module = getModuleV2(*module)
         else:
           assert version == 3 or version == 4
           if len(module) != 2:
-            LogTrace("Entry in memory map is not a 2 item list: " + str(module))
+            LogDebug("Entry in memory map is not a 2 item list: " + str(module))
             return
           module = getModuleV3(*module)
 
@@ -147,26 +147,26 @@ class SymbolicationRequest:
       # Check stack is well-formatted
       for stack in stacks:
         if not isinstance(stack, list):
-          LogTrace("stack is not a list")
+          LogDebug("stack is not a list")
           return
         for entry in stack:
           if not isinstance(entry, list):
-            LogTrace("stack entry is not a list")
+            LogDebug("stack entry is not a list")
             return
           if len(entry) != 2:
-            LogTrace("stack entry doesn't have exactly 2 elements")
+            LogDebug("stack entry doesn't have exactly 2 elements")
             return
 
         self.stacks.append(stack)
 
     except Exception as e:
-      LogTrace("Exception while parsing request: " + str(e))
+      LogDebug("Exception while parsing request: " + str(e))
       return
 
     self.isValidRequest = True
 
   def ForwardRequest(self, indexes, stack, modules, symbolicatedStack):
-    LogTrace("Forwarding " + str(len(stack)) + " PCs for symbolication")
+    LogDebug("Forwarding " + str(len(stack)) + " PCs for symbolication")
 
     try:
       url = self.symFileManager.sOptions["remoteSymbolServer"]

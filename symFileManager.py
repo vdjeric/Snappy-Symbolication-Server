@@ -1,4 +1,4 @@
-from symLogging import LogTrace, LogError, LogMessage, CheckDebug
+from symLogging import LogDebug, LogError, LogMessage, CheckDebug
 
 import contextlib
 import json
@@ -60,7 +60,7 @@ class SymFileManager:
       self.sCacheLock.release()
 
     if libSymbolMap is None:
-      LogTrace("Need to fetch PDB file for " + libName + " " + breakpadId)
+      LogDebug("Need to fetch PDB file for " + libName + " " + breakpadId)
 
       # Guess the name of the .sym file on disk
       if libName[-4:] == ".pdb":
@@ -87,10 +87,10 @@ class SymFileManager:
             break
 
       if not libSymbolMap:
-        LogTrace("No matching sym files, tried paths: %s and URLs: %s" % (", ".join(self.sOptions["symbolPaths"]), ", ".join(self.sOptions["symbolURLs"])))
+        LogDebug("No matching sym files, tried paths: %s and URLs: %s" % (", ".join(self.sOptions["symbolPaths"]), ", ".join(self.sOptions["symbolURLs"])))
         return None
 
-      LogTrace("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
+      LogDebug("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
       self.sCacheLock.acquire()
       try:
         self.MaybeEvict(libSymbolMap.GetEntryCount())
@@ -99,7 +99,7 @@ class SymFileManager:
         self.sCache[libName][breakpadId] = libSymbolMap
         self.sCacheCount += libSymbolMap.GetEntryCount()
         self.UpdateMruList(libName, breakpadId)
-        LogTrace(str(self.sCacheCount) + " symbols in cache after fetching symbol file")
+        LogDebug(str(self.sCacheCount) + " symbols in cache after fetching symbol file")
       finally:
         self.sCacheLock.release()
 
@@ -111,7 +111,7 @@ class SymFileManager:
         LogMessage("Parsing SYM file at " + path)
         return self.FetchSymbolsFromFileObj(symFile)
     except Exception as e:
-      LogTrace("Error opening file " + path + ": " + str(e))
+      LogDebug("Error opening file " + path + ": " + str(e))
       return None
 
   def FetchSymbolsFromURL(self, url):
@@ -122,7 +122,7 @@ class SymFileManager:
         LogMessage("Parsing SYM file at " + url)
         return self.FetchSymbolsFromFileObj(request)
     except Exception as e:
-      LogTrace("Error opening URL " + url + ": " + str(e))
+      LogDebug("Error opening URL " + url + ": " + str(e))
       return None
 
   def FetchSymbolsFromFileObj(self, symFile):
@@ -137,7 +137,7 @@ class SymFileManager:
           line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 4:
-            LogTrace("Line " + str(lineNum) + " is messed")
+            LogDebug("Line " + str(lineNum) + " is messed")
             continue
           address = int(fields[1], 16)
           symbolMap[address] = " ".join(fields[3:])
@@ -146,7 +146,7 @@ class SymFileManager:
           line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 5:
-            LogTrace("Line " + str(lineNum) + " is messed")
+            LogDebug("Line " + str(lineNum) + " is messed")
             continue
           address = int(fields[1], 16)
           symbolMap[address] = " ".join(fields[4:])
@@ -157,7 +157,7 @@ class SymFileManager:
 
     logString = "Found " + str(len(symbolMap.keys())) + " unique entries from "
     logString += str(publicCount) + " PUBLIC lines, " + str(funcCount) + " FUNC lines"
-    LogTrace(logString)
+    LogDebug(logString)
 
     return SymbolInfo(symbolMap)
 
@@ -171,7 +171,7 @@ class SymFileManager:
       for libName, breakpadId in mruSymbols:
         sym = self.GetLibSymbolMap(libName, breakpadId)
         if sym is None:
-          LogTrace("Failed to prefetch symbols for (%s,%s)" % (libName, breakpadId))
+          LogDebug("Failed to prefetch symbols for (%s,%s)" % (libName, breakpadId))
       LogMessage("Finished prefetching recent symbol files")
     except IOError:
       LogError("Error reading MRU symbols state file")
@@ -194,7 +194,7 @@ class SymFileManager:
 
   def MaybeEvict(self, freeEntriesNeeded):
     maxCacheSize = self.sOptions["maxCacheEntries"]
-    LogTrace("Cache occupancy before MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
+    LogDebug("Cache occupancy before MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
     #print "Current MRU: " + str(self.sMruSymbols)
     #print "Maybe evicting to make room for ", freeEntriesNeeded, " new entries"
 
@@ -225,5 +225,5 @@ class SymFileManager:
       numToEvict -= evicteeCount
 
     #print "MRU after: " + str(self.sMruSymbols)
-    LogTrace("Cache occupancy after MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
+    LogDebug("Cache occupancy after MaybeEvict: " + str(self.sCacheCount) + "/" + str(maxCacheSize))
 

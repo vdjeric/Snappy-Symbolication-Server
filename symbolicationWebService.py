@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled, SetDebug, CheckDebug
+from symLogging import LogDebug, LogError, LogMessage, SetLoggingOptions, SetDebug, CheckDebug
 from symFileManager import SymFileManager
 from symbolicationRequest import SymbolicationRequest
 
@@ -12,6 +12,9 @@ from SocketServer import ThreadingMixIn
 import threading
 import json
 import ConfigParser
+
+# Report errors while symLogging is not configured yet
+import logging
 
 # Timeout (in seconds) for reading in a request from a client connection
 SOCKET_READ_TIMEOUT = 10.0
@@ -69,7 +72,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     return self.do_POST()
 
   def do_POST(self):
-    LogTrace("Received request: " + self.path + " on thread " + threading.currentThread().getName())
+    LogDebug("Received request: " + self.path + " on thread " + threading.currentThread().getName())
 
     try:
       clientIP = self.client_address[0]
@@ -80,7 +83,7 @@ class RequestHandler(BaseHTTPRequestHandler):
           self.sendHeaders(200)
           return
     except Exception as e:
-      LogTrace("Exception in do_POST debug check: " + e)
+      LogDebug("Exception in do_POST debug check: " + e)
       return
 
     try:
@@ -95,7 +98,7 @@ class RequestHandler(BaseHTTPRequestHandler):
       if len(requestBody) < length:
         # This could be a broken connection, writing an error message into it could be a bad idea
         # See http://bugs.python.org/issue14574
-        LogTrace("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
+        LogDebug("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
         return
 
       # vdjeric: temporary hack to stop a spammy request
@@ -103,16 +106,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.sendHeaders(400)
         return
 
-      LogTrace("Request body: " + requestBody)
+      LogDebug("Request body: " + requestBody)
       rawRequest = json.loads(requestBody)
 
       request = SymbolicationRequest(gSymFileManager, rawRequest)
       if not request.isValidRequest:
-        LogTrace("Unable to parse request")
+        LogDebug("Unable to parse request")
         self.sendHeaders(400)
         return
     except Exception as e:
-      LogTrace("Unable to parse request body: " + str(e))
+      LogDebug("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
       self.connection.settimeout(None)
       self.sendHeaders(400)
@@ -136,7 +139,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
       request.Reset()
 
-      LogTrace("Response: " + json.dumps(response))
+      LogDebug("Response: " + json.dumps(response))
       self.wfile.write(json.dumps(response))
     except Exception as e:
       LogError("Exception in do_POST: " + str(e))
@@ -146,7 +149,7 @@ def ReadConfigFile():
   if len(sys.argv) == 1:
     return True
   elif len(sys.argv) > 2:
-    LogError("Usage: symbolicationWebService.py [<config file>]")
+    logging.error("Usage: symbolicationWebService.py [<config file>]")
     return False
   elif len(sys.argv) == 2:
     try:
@@ -157,26 +160,26 @@ def ReadConfigFile():
       configParser.readfp(configFile)
       configFile.close()
     except ConfigParser.Error as e:
-      LogError("Unable to parse config file " + sys.argv[1] + ": " + str(e))
-    except:
-      LogError("Unable to open config file " + sys.argv[1])
+      logging.error("Unable to parse config file %s: %s", sys.argv[1], e)
+    except Exception as e:
+      logging.error("Unable to open config file %s: %s", sys.argv[1], e)
       return False
 
   # Check for section names
-  if set(configParser.sections()) != set(["General", "SymbolPaths", "SymbolURLs"]):
-    LogError("Config file should be made up of three sections: 'General', 'SymbolPaths' and 'SymbolURLs'")
+  if set(configParser.sections()) != set(["General", "SymbolPaths", "SymbolURLs", "Log"]):
+    print("Config file should be made up of three sections: 'General', 'SymbolPaths', 'SymbolURLs' and 'Log'")
     return False
 
   generalSectionOptions = configParser.items("General")
   for (option, value) in generalSectionOptions:
     if option not in gOptions:
-      LogError("Unknown config option '" + option + "' in the 'General' section of config file")
+      logging.error("Unknown config option '" + option + "' in the 'General' section of config file")
       return False
     elif type(gOptions[option]) == int:
       try:
         value = int(value)
       except ValueError:
-        LogError("Integer value expected for config option '" + option + "'")
+        logging.error("Integer value expected for config option '" + option + "'")
         return False
     gOptions[option] = value
 
@@ -191,6 +194,8 @@ def ReadConfigFile():
   if configURLs:
     gOptions["symbolURLs"] = [url for name, url in configURLs]
 
+  gOptions["Log"] = dict(configParser.items("Log"))
+
   return True
 
 def Main():
@@ -199,7 +204,7 @@ def Main():
   if not ReadConfigFile():
     return 1
 
-  SetTracingEnabled(gOptions["enableTracing"] > 0)
+  SetLoggingOptions(gOptions["Log"])
 
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(gOptions)
