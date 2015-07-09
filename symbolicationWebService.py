@@ -47,7 +47,6 @@ gOptions = {
   ],
   # URLs to symbol stores
   "symbolURLs": [
-    "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
   ]
 }
 
