@@ -13,8 +13,8 @@ def printThreads():
                                                         lineno, name))
             if line:
                 code.append("  %s" % (line.strip()))
-    
+
     for line in code:
         print >> sys.stderr, line
     print >> sys.stderr, "\n*** STACKTRACE - END ***\n"
- 
+

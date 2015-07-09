@@ -1,7 +1,8 @@
 # Exclude local config files, except sample file
 ##################################################
 *.ini
-!sample.ini
+!sample-linux.ini
+!sample-windows.ini
 
 # Python generated files
 ##################################################

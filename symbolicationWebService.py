@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from symLogging import LogTrace, LogError, LogMessage, SetTracingEnabled, SetDebug, CheckDebug
+from symLogging import LogDebug, LogError, LogMessage, SetLoggingOptions, SetDebug, CheckDebug
 from symFileManager import SymFileManager
 from symbolicationRequest import SymbolicationRequest
 
@@ -12,6 +12,10 @@ from SocketServer import ThreadingMixIn
 import threading
 import json
 import ConfigParser
+from collections import OrderedDict as _default_dict
+
+# Report errors while symLogging is not configured yet
+import logging
 
 # Timeout (in seconds) for reading in a request from a client connection
 SOCKET_READ_TIMEOUT = 10.0
@@ -43,9 +47,26 @@ gOptions = {
   ],
   # URLs to symbol stores
   "symbolURLs": [
-    "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
   ]
 }
+
+# Use a new class to make defaults case-sensitive
+class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
+  superClass = ConfigParser.SafeConfigParser
+  def __init__(self, defaults=None, dict_type=_default_dict,
+                allow_no_value=False):
+    self.optionxform = str
+    self.superClass.__init__(self, defaults, dict_type, allow_no_value)
+
+  def items(self, section, raw=False, vars=None):
+    defaults = self.defaults()
+    if vars is not None:
+      defaults.update(vars)
+
+    # Remove default items from the result
+    return filter(
+              lambda item: item[0] not in defaults,
+              self.superClass.items(self, section, raw, vars))
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
   pass
@@ -69,7 +90,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     return self.do_POST()
 
   def do_POST(self):
-    LogTrace("Received request: " + self.path + " on thread " + threading.currentThread().getName())
+    LogDebug("Received request: " + self.path + " on thread " + threading.currentThread().getName())
 
     try:
       clientIP = self.client_address[0]
@@ -80,7 +101,7 @@ class RequestHandler(BaseHTTPRequestHandler):
           self.sendHeaders(200)
           return
     except Exception as e:
-      LogTrace("Exception in do_POST debug check: " + e)
+      LogDebug("Exception in do_POST debug check: " + e)
       return
 
     try:
@@ -95,7 +116,7 @@ class RequestHandler(BaseHTTPRequestHandler):
       if len(requestBody) < length:
         # This could be a broken connection, writing an error message into it could be a bad idea
         # See http://bugs.python.org/issue14574
-        LogTrace("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
+        LogDebug("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
         return
 
       # vdjeric: temporary hack to stop a spammy request
@@ -103,16 +124,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.sendHeaders(400)
         return
 
-      LogTrace("Request body: " + requestBody)
+      LogDebug("Request body: " + requestBody)
       rawRequest = json.loads(requestBody)
 
       request = SymbolicationRequest(gSymFileManager, rawRequest)
       if not request.isValidRequest:
-        LogTrace("Unable to parse request")
+        LogDebug("Unable to parse request")
         self.sendHeaders(400)
         return
     except Exception as e:
-      LogTrace("Unable to parse request body: " + str(e))
+      LogDebug("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
       self.connection.settimeout(None)
       self.sendHeaders(400)
@@ -136,7 +157,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
       request.Reset()
 
-      LogTrace("Response: " + json.dumps(response))
+      LogDebug("Response: " + json.dumps(response))
       self.wfile.write(json.dumps(response))
     except Exception as e:
       LogError("Exception in do_POST: " + str(e))
@@ -146,50 +167,57 @@ def ReadConfigFile():
   if len(sys.argv) == 1:
     return True
   elif len(sys.argv) > 2:
-    LogError("Usage: symbolicationWebService.py [<config file>]")
+    logging.error("Usage: symbolicationWebService.py [<config file>]")
     return False
   elif len(sys.argv) == 2:
     try:
-      configParser = ConfigParser.ConfigParser()
-      # Make parser case-sensitive
-      configParser.optionxform=str
+      # ConfigParser uses the pattern %(<variable>)<type> for variable substitution,
+      # so '%' found in environment variable values will raise an error. We replace
+      # '%' by '%%' to make the parser understand it is literal character.
+      environ = {key:value.replace(r"%", r"%%") for key, value in os.environ.iteritems()}
+
+      configParser = CaseSensitiveConfigParser(environ)
       configFile = open(sys.argv[1], "r")
       configParser.readfp(configFile)
       configFile.close()
     except ConfigParser.Error as e:
-      LogError("Unable to parse config file " + sys.argv[1] + ": " + str(e))
-    except:
-      LogError("Unable to open config file " + sys.argv[1])
+      logging.error("Unable to parse config file %s: %s", sys.argv[1], e)
+    except Exception as e:
+      logging.error("Unable to open config file %s: %s", sys.argv[1], e)
       return False
 
   # Check for section names
-  if set(configParser.sections()) != set(["General", "SymbolPaths", "SymbolURLs"]):
-    LogError("Config file should be made up of three sections: 'General', 'SymbolPaths' and 'SymbolURLs'")
+  if not set(["General", "Log"]).issubset(set(configParser.sections())):
+    logging.error("'General' and 'Log' sections are mandatory in the config file")
     return False
 
   generalSectionOptions = configParser.items("General")
   for (option, value) in generalSectionOptions:
     if option not in gOptions:
-      LogError("Unknown config option '" + option + "' in the 'General' section of config file")
+      logging.error("Unknown config option '" + option + "' in the 'General' section of config file")
       return False
     elif type(gOptions[option]) == int:
       try:
         value = int(value)
       except ValueError:
-        LogError("Integer value expected for config option '" + option + "'")
+        logging.error("Integer value expected for config option '" + option + "'")
         return False
     gOptions[option] = value
 
   # Get the list of symbol paths from the config file
-  configPaths = configParser.items("SymbolPaths")
-  if configPaths:
-    # Drop defaults if config file entries exist
-    gOptions["symbolPaths"] = [path for name, path in configPaths]
+  if configParser.has_section("SymbolPaths"):
+    configPaths = configParser.items("SymbolPaths")
+    if configPaths:
+      # Drop defaults if config file entries exist
+      gOptions["symbolPaths"] = [path for name, path in configPaths]
 
   # Get the list of symbol URLs from the config file
-  configURLs = configParser.items("SymbolURLs")
-  if configURLs:
-    gOptions["symbolURLs"] = [url for name, url in configURLs]
+  if configParser.has_section("SymbolURLs"):
+    configURLs = configParser.items("SymbolURLs")
+    if configURLs:
+      gOptions["symbolURLs"] = [url for name, url in configURLs if name not in environ]
+
+  gOptions["Log"] = dict(configParser.items("Log"))
 
   return True
 
@@ -199,7 +227,7 @@ def Main():
   if not ReadConfigFile():
     return 1
 
-  SetTracingEnabled(gOptions["enableTracing"] > 0)
+  SetLoggingOptions(gOptions["Log"])
 
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(gOptions)
