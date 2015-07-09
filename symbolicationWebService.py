@@ -12,6 +12,7 @@ from SocketServer import ThreadingMixIn
 import threading
 import json
 import ConfigParser
+from collections import OrderedDict as _default_dict
 
 # Report errors while symLogging is not configured yet
 import logging
@@ -49,6 +50,24 @@ gOptions = {
     "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
   ]
 }
+
+# Use a new class to make defaults case-sensitive
+class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
+  superClass = ConfigParser.SafeConfigParser
+  def __init__(self, defaults=None, dict_type=_default_dict,
+                allow_no_value=False):
+    self.optionxform = str
+    self.superClass.__init__(self, defaults, dict_type, allow_no_value)
+
+  def items(self, section, raw=False, vars=None):
+    defaults = self.defaults()
+    if vars is not None:
+      defaults.update(vars)
+
+    # Remove default items from the result
+    return filter(
+              lambda item: item[0] not in defaults,
+              self.superClass.items(self, section, raw, vars))
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
   pass
@@ -153,9 +172,12 @@ def ReadConfigFile():
     return False
   elif len(sys.argv) == 2:
     try:
-      configParser = ConfigParser.ConfigParser()
-      # Make parser case-sensitive
-      configParser.optionxform=str
+      # ConfigParser uses the pattern %(<variable>)<type> for variable substitution,
+      # so '%' found in environment variable values will raise an error. We replace
+      # '%' by '%%' to make the parser understand it is literal character.
+      environ = {key:value.replace(r"%", r"%%") for key, value in os.environ.iteritems()}
+
+      configParser = CaseSensitiveConfigParser(environ)
       configFile = open(sys.argv[1], "r")
       configParser.readfp(configFile)
       configFile.close()
@@ -166,8 +188,8 @@ def ReadConfigFile():
       return False
 
   # Check for section names
-  if set(configParser.sections()) != set(["General", "SymbolPaths", "SymbolURLs", "Log"]):
-    print("Config file should be made up of three sections: 'General', 'SymbolPaths', 'SymbolURLs' and 'Log'")
+  if not set(["General", "Log"]).issubset(set(configParser.sections())):
+    logging.error("'General' and 'Log' sections are mandatory in the config file")
     return False
 
   generalSectionOptions = configParser.items("General")
@@ -184,15 +206,17 @@ def ReadConfigFile():
     gOptions[option] = value
 
   # Get the list of symbol paths from the config file
-  configPaths = configParser.items("SymbolPaths")
-  if configPaths:
-    # Drop defaults if config file entries exist
-    gOptions["symbolPaths"] = [path for name, path in configPaths]
+  if configParser.has_section("SymbolPaths"):
+    configPaths = configParser.items("SymbolPaths")
+    if configPaths:
+      # Drop defaults if config file entries exist
+      gOptions["symbolPaths"] = [path for name, path in configPaths]
 
   # Get the list of symbol URLs from the config file
-  configURLs = configParser.items("SymbolURLs")
-  if configURLs:
-    gOptions["symbolURLs"] = [url for name, url in configURLs]
+  if configParser.has_section("SymbolURLs"):
+    configURLs = configParser.items("SymbolURLs")
+    if configURLs:
+      gOptions["symbolURLs"] = [url for name, url in configURLs if name not in environ]
 
   gOptions["Log"] = dict(configParser.items("Log"))
 
