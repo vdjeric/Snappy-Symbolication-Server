@@ -72,6 +72,33 @@ class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
   pass
 
+def processSymbolicationRequest(request):
+  try:
+    request = SymbolicationRequest(gSymFileManager, request)
+    if not request.isValidRequest:
+      LogDebug("Unable to parse request")
+      return None
+
+    response = { 'symbolicatedStacks': [] }
+    for stackIndex in range(len(request.stacks)):
+      symbolicatedStack = request.Symbolicate(stackIndex)
+
+      # Free up memory ASAP
+      request.stacks[stackIndex] = []
+
+      response['symbolicatedStacks'].append(symbolicatedStack)
+
+    response['knownModules'] = request.knownModules[:]
+    if not request.includeKnownModulesInResponse:
+      response = response['symbolicatedStacks']
+
+    request.Reset()
+
+    return json.dumps(response)
+  except Exception as exc:
+    LogDebug("Unable to parse request body: " + str(exc))
+    return None
+
 class RequestHandler(BaseHTTPRequestHandler):
   # suppress most built-in logging
   def log_request(self, code='-', size='-'): pass
@@ -128,8 +155,8 @@ class RequestHandler(BaseHTTPRequestHandler):
       LogDebug("Request body: " + requestBody)
       rawRequest = json.loads(requestBody)
 
-      request = SymbolicationRequest(gSymFileManager, rawRequest)
-      if not request.isValidRequest:
+      response = processSymbolicationRequest(rawRequest)
+      if response is None:
         LogDebug("Unable to parse request")
         self.sendHeaders(400)
         return
@@ -142,24 +169,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     try:
       self.sendHeaders(200)
-
-      response = { 'symbolicatedStacks': [] }
-      for stackIndex in range(len(request.stacks)):
-        symbolicatedStack = request.Symbolicate(stackIndex)
-
-        # Free up memory ASAP
-        request.stacks[stackIndex] = []
-
-        response['symbolicatedStacks'].append(symbolicatedStack)
-
-      response['knownModules'] = request.knownModules[:]
-      if not request.includeKnownModulesInResponse:
-        response = response['symbolicatedStacks']
-
-      request.Reset()
-
-      LogDebug("Response: " + json.dumps(response))
-      self.wfile.write(json.dumps(response))
+      LogDebug("Response: " + response)
+      self.wfile.write(response)
     except Exception as e:
       LogError("Exception in do_POST: " + str(e))
 
