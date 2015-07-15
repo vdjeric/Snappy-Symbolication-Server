@@ -3,6 +3,7 @@
 from symLogging import LogDebug, LogError, LogMessage, SetLoggingOptions, SetDebug, CheckDebug
 from symFileManager import SymFileManager
 from symbolicationRequest import SymbolicationRequest
+from concurrent.futures import ProcessPoolExecutor as Pool
 
 import sys
 import os
@@ -23,6 +24,9 @@ SOCKET_READ_TIMEOUT = 10.0
 
 # .SYM cache manager
 gSymFileManager = None
+
+# Pool of symbolication workers
+gPool = None
 
 # Default config options
 gOptions = {
@@ -72,9 +76,23 @@ class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
   pass
 
-def processSymbolicationRequest(request):
+def initializeSubprocess(options):
+  global gSymFileManager
+
+  # Setup logging in the child process
+  SetLoggingOptions(options["Log"])
+
+  # Create the .SYM cache manager singleton
+  gSymFileManager = SymFileManager(options)
+
+  # Prefetch recent symbols
+  gSymFileManager.PrefetchRecentSymbolFiles()
+
+
+def processSymbolicationRequest(rawRequest):
   try:
-    request = SymbolicationRequest(gSymFileManager, request)
+    symRequest = json.loads(rawRequest)
+    request = SymbolicationRequest(gSymFileManager, symRequest)
     if not request.isValidRequest:
       LogDebug("Unable to parse request")
       return None
@@ -153,9 +171,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         return
 
       LogDebug("Request body: " + requestBody)
-      rawRequest = json.loads(requestBody)
 
-      response = processSymbolicationRequest(rawRequest)
+      response = gPool.submit(processSymbolicationRequest, requestBody).result()
       if response is None:
         LogDebug("Unable to parse request")
         self.sendHeaders(400)
@@ -234,18 +251,20 @@ def ReadConfigFile():
   return True
 
 def Main():
-  global gSymFileManager, gOptions
+  global gSymFileManager, gOptions, gPool
 
   if not ReadConfigFile():
     return 1
 
+  # In a perfect world, we could create a process per cpu core.
+  # But then we'd have to deal with cache sharing
+  gPool = Pool(1)
+  gPool.submit(initializeSubprocess, gOptions)
+
+  # Setup logging in the parent process.
+  # Ensure this is called after the call to initializeSubprocess to
+  # avoid duplicate messages in Unix systems.
   SetLoggingOptions(gOptions["Log"])
-
-  # Create the .SYM cache manager singleton
-  gSymFileManager = SymFileManager(gOptions)
-
-  # Prefetch recent symbols
-  gSymFileManager.PrefetchRecentSymbolFiles()
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))
 
@@ -259,7 +278,9 @@ def Main():
     LogMessage("Received SIGINT, stopping...")
 
   httpd.server_close()
+  gPool.shutdown()
   LogMessage("Server stopped - " + gOptions['hostname'] + ":" + str(gOptions['portNumber']))
   return 0
 
-sys.exit(Main())
+if __name__ == '__main__':
+  sys.exit(Main())
