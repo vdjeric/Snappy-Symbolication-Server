@@ -8,19 +8,16 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 import sys
 import os
 import time
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
-from SocketServer import ThreadingMixIn
-import threading
 import json
 import tempfile
 import ConfigParser
 from collections import OrderedDict as _default_dict
+import tornado.gen
+from tornado.ioloop import IOLoop
+from tornado.web import Application, RequestHandler, url
 
 # Report errors while symLogging is not configured yet
 import logging
-
-# Timeout (in seconds) for reading in a request from a client connection
-SOCKET_READ_TIMEOUT = 10.0
 
 # .SYM cache manager
 gSymFileManager = None
@@ -73,9 +70,6 @@ class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
               lambda item: item[0] not in defaults,
               self.superClass.items(self, section, raw, vars))
 
-class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-  pass
-
 def initializeSubprocess(options):
   global gSymFileManager
 
@@ -91,8 +85,8 @@ def initializeSubprocess(options):
 
 def processSymbolicationRequest(rawRequest):
   try:
-    symRequest = json.loads(rawRequest)
-    request = SymbolicationRequest(gSymFileManager, symRequest)
+    decodedRequest = json.loads(rawRequest)
+    request = SymbolicationRequest(gSymFileManager, decodedRequest)
     if not request.isValidRequest:
       LogDebug("Unable to parse request")
       return None
@@ -117,7 +111,17 @@ def processSymbolicationRequest(rawRequest):
     LogDebug("Unable to parse request body: " + str(exc))
     return None
 
-class RequestHandler(BaseHTTPRequestHandler):
+class DebugHandler(RequestHandler):
+  def get(self, path):
+    self.post(path)
+
+  def post(self, path):
+    if self.request.remote_ip == "127.0.0.1":
+      SetDebug(path == "debug")
+      self.set_status(200)
+      self.set_header("Content-type", "application/json")
+
+class SymbolHandler(RequestHandler):
   # suppress most built-in logging
   def log_request(self, code='-', size='-'): pass
   def log_message(self, formats, *args): pass
@@ -125,39 +129,23 @@ class RequestHandler(BaseHTTPRequestHandler):
     LogError(args[0] % tuple(args[1:]))
 
   def sendHeaders(self, errorCode):
-    self.send_response(errorCode)
-    self.send_header("Content-type", "application/json")
-    self.end_headers()
+    self.set_status(errorCode)
+    self.set_header("Content-type", "application/json")
 
-  def do_HEAD(self):
+  def head(self):
     self.sendHeaders(200)
 
-  def do_GET(self):
-    return self.do_POST()
+  def get(self):
+    return self.post()
 
-  def do_POST(self):
-    LogDebug("Received request: " + self.path + " on thread " + threading.currentThread().getName())
-
-    try:
-      clientIP = self.client_address[0]
-      if clientIP == "127.0.0.1":
-        path = self.path.lower()
-        if path == "/debug" or path == "/nodebug":
-          SetDebug(path == "/debug")
-          self.sendHeaders(200)
-          return
-    except Exception as e:
-      LogDebug("Exception in do_POST debug check: " + e)
-      return
+  @tornado.gen.coroutine
+  def post(self):
+    LogDebug("Received request from " + self.request.remote_ip)
 
     try:
       CheckDebug()
-      length = int(self.headers["Content-Length"])
-      # Read in the request body without blocking
-      self.connection.settimeout(SOCKET_READ_TIMEOUT)
-      requestBody = self.rfile.read(length)
-      # Put the connection back into blocking mode so rfile/wfile can be used safely
-      self.connection.settimeout(None)
+      length = int(self.request.headers.get("Content-Length"))
+      requestBody = self.request.body
 
       if len(requestBody) < length:
         # This could be a broken connection, writing an error message into it could be a bad idea
@@ -172,7 +160,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
       LogDebug("Request body: " + requestBody)
 
-      response = gPool.submit(processSymbolicationRequest, requestBody).result()
+      response = yield gPool.submit(processSymbolicationRequest, requestBody)
       if response is None:
         LogDebug("Unable to parse request")
         self.sendHeaders(400)
@@ -180,16 +168,15 @@ class RequestHandler(BaseHTTPRequestHandler):
     except Exception as e:
       LogDebug("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
-      self.connection.settimeout(None)
       self.sendHeaders(400)
       return
 
     try:
       self.sendHeaders(200)
       LogDebug("Response: " + response)
-      self.wfile.write(response)
+      self.write(response)
     except Exception as e:
-      LogError("Exception in do_POST: " + str(e))
+      LogError("Exception in post: " + str(e))
 
 def ReadConfigFile():
   configFileData = []
@@ -268,16 +255,18 @@ def Main():
 
   LogMessage("Starting server with the following options:\n" + str(gOptions))
 
-  # Start the Web service
-  httpd = ThreadedHTTPServer((gOptions['hostname'], gOptions['portNumber']), RequestHandler)
-  LogMessage("Server started - " + gOptions['hostname'] + ":" + str(gOptions['portNumber']))
+  app = Application([
+    url(r"/", SymbolHandler),
+    url(r'/(debug)', DebugHandler),
+    url(r'/(nodebug)', DebugHandler)])
+
+  app.listen(gOptions['portNumber'], gOptions['hostname'])
 
   try:
-    httpd.serve_forever()
+    IOLoop.current().start()
   except KeyboardInterrupt:
     LogMessage("Received SIGINT, stopping...")
 
-  httpd.server_close()
   gPool.shutdown()
   LogMessage("Server stopped - " + gOptions['hostname'] + ":" + str(gOptions['portNumber']))
   return 0
