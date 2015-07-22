@@ -84,32 +84,28 @@ def initializeSubprocess(options):
 
 
 def processSymbolicationRequest(rawRequest, remoteIp):
-  try:
-    decodedRequest = json.loads(rawRequest)
-    request = SymbolicationRequest(gSymFileManager, decodedRequest, remoteIp)
-    if not request.isValidRequest:
-      LogDebug("Unable to parse request", remoteIp)
-      return None
-
-    response = { 'symbolicatedStacks': [] }
-    for stackIndex in range(len(request.stacks)):
-      symbolicatedStack = request.Symbolicate(stackIndex)
-
-      # Free up memory ASAP
-      request.stacks[stackIndex] = []
-
-      response['symbolicatedStacks'].append(symbolicatedStack)
-
-    response['knownModules'] = request.knownModules[:]
-    if not request.includeKnownModulesInResponse:
-      response = response['symbolicatedStacks']
-
-    request.Reset()
-
-    return json.dumps(response)
-  except Exception as exc:
-    LogDebug("Unable to parse request body: " + str(exc), remoteIp)
+  decodedRequest = json.loads(rawRequest)
+  request = SymbolicationRequest(gSymFileManager, decodedRequest, remoteIp)
+  if not request.isValidRequest:
+    LogDebug("Unable to parse request", remoteIp)
     return None
+
+  response = { 'symbolicatedStacks': [] }
+  for stackIndex in range(len(request.stacks)):
+    symbolicatedStack = request.Symbolicate(stackIndex)
+
+    # Free up memory ASAP
+    request.stacks[stackIndex] = []
+
+    response['symbolicatedStacks'].append(symbolicatedStack)
+
+  response['knownModules'] = request.knownModules[:]
+  if not request.includeKnownModulesInResponse:
+    response = response['symbolicatedStacks']
+
+  request.Reset()
+
+  return json.dumps(response)
 
 class DebugHandler(RequestHandler):
   def get(self, path):
