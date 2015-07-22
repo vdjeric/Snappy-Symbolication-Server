@@ -83,12 +83,12 @@ def initializeSubprocess(options):
   gSymFileManager.PrefetchRecentSymbolFiles()
 
 
-def processSymbolicationRequest(rawRequest):
+def processSymbolicationRequest(rawRequest, remoteIp):
   try:
     decodedRequest = json.loads(rawRequest)
-    request = SymbolicationRequest(gSymFileManager, decodedRequest)
+    request = SymbolicationRequest(gSymFileManager, decodedRequest, remoteIp)
     if not request.isValidRequest:
-      LogDebug("Unable to parse request")
+      LogDebug("Unable to parse request", remoteIp)
       return None
 
     response = { 'symbolicatedStacks': [] }
@@ -108,7 +108,7 @@ def processSymbolicationRequest(rawRequest):
 
     return json.dumps(response)
   except Exception as exc:
-    LogDebug("Unable to parse request body: " + str(exc))
+    LogDebug("Unable to parse request body: " + str(exc), remoteIp)
     return None
 
 class DebugHandler(RequestHandler):
@@ -122,6 +122,15 @@ class DebugHandler(RequestHandler):
       self.set_header("Content-type", "application/json")
 
 class SymbolHandler(RequestHandler):
+  def LogDebug(self, string):
+    LogDebug(string, self.request.remote_ip)
+
+  def LogMessage(self, string):
+    LogMessage(string, self.request.remote_ip)
+
+  def LogError(self, string):
+    LogError(string, self.request.remote_ip)
+
   def sendHeaders(self, errorCode):
     self.set_status(errorCode)
     self.set_header("Content-type", "application/json")
@@ -134,7 +143,7 @@ class SymbolHandler(RequestHandler):
 
   @tornado.gen.coroutine
   def post(self):
-    LogDebug("Received request from " + self.request.remote_ip)
+    self.LogDebug("Received request")
 
     try:
       CheckDebug()
@@ -145,25 +154,29 @@ class SymbolHandler(RequestHandler):
         self.sendHeaders(400)
         return
 
-      LogDebug("Request body: " + requestBody)
+      self.LogDebug("Request body: " + requestBody)
 
-      response = yield gPool.submit(processSymbolicationRequest, requestBody)
+      response = yield gPool.submit(
+                  processSymbolicationRequest,
+                  requestBody,
+                  self.request.remote_ip)
+
       if response is None:
-        LogDebug("Unable to parse request")
+        self.LogDebug("Unable to parse request")
         self.sendHeaders(400)
         return
     except Exception as e:
-      LogDebug("Unable to parse request body: " + str(e))
+      self.LogDebug("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
       self.sendHeaders(400)
       return
 
     try:
       self.sendHeaders(200)
-      LogDebug("Response: " + response)
+      self.LogDebug("Response: " + response)
       self.write(response)
     except Exception as e:
-      LogError("Exception in post: " + str(e))
+      self.LogError("Exception in post: " + str(e))
 
 def ReadConfigFile():
   configFileData = []

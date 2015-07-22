@@ -47,21 +47,26 @@ def SetLoggingOptions(logOptions):
   logLevel = getattr(logging, logOptions.get("logLevel", "INFO"))
   gLog.setLevel(logLevel)
 
-def doLog(dbgLevel, string):
+def doLog(dbgLevel, string, remoteIp):
   pid = os.getpid()
-  gLog.log(dbgLevel, "%d\t%s", pid, string)
+  gLog.log(
+    dbgLevel,
+    "%d\t%s%s",
+    pid,
+    string,
+    " IP=" + remoteIp if remoteIp else '')
 
-def LogDebug(string):
+def LogDebug(string, remoteIp=None):
   if gLog.isEnabledFor(logging.DEBUG):
-    doLog(logging.DEBUG, string)
+    doLog(logging.DEBUG, string, remoteIp)
 
-def LogError(string):
+def LogError(string, remoteIp=None):
   if gLog.isEnabledFor(logging.ERROR):
-    doLog(logging.ERROR, string)
+    doLog(logging.ERROR, string, remoteIp)
 
-def LogMessage(string):
+def LogMessage(string, remoteIp=None):
   if gLog.isEnabledFor(logging.INFO):
-    doLog(logging.INFO, string)
+    doLog(logging.INFO, string, remoteIp)
 
 def SetDebug(isEnabled):
   global gDebug
