@@ -83,33 +83,29 @@ def initializeSubprocess(options):
   gSymFileManager.PrefetchRecentSymbolFiles()
 
 
-def processSymbolicationRequest(rawRequest):
-  try:
-    decodedRequest = json.loads(rawRequest)
-    request = SymbolicationRequest(gSymFileManager, decodedRequest)
-    if not request.isValidRequest:
-      LogDebug("Unable to parse request")
-      return None
-
-    response = { 'symbolicatedStacks': [] }
-    for stackIndex in range(len(request.stacks)):
-      symbolicatedStack = request.Symbolicate(stackIndex)
-
-      # Free up memory ASAP
-      request.stacks[stackIndex] = []
-
-      response['symbolicatedStacks'].append(symbolicatedStack)
-
-    response['knownModules'] = request.knownModules[:]
-    if not request.includeKnownModulesInResponse:
-      response = response['symbolicatedStacks']
-
-    request.Reset()
-
-    return json.dumps(response)
-  except Exception as exc:
-    LogDebug("Unable to parse request body: " + str(exc))
+def processSymbolicationRequest(rawRequest, remoteIp):
+  decodedRequest = json.loads(rawRequest)
+  request = SymbolicationRequest(gSymFileManager, decodedRequest, remoteIp)
+  if not request.isValidRequest:
+    LogDebug("Unable to parse request", remoteIp)
     return None
+
+  response = { 'symbolicatedStacks': [] }
+  for stackIndex in range(len(request.stacks)):
+    symbolicatedStack = request.Symbolicate(stackIndex)
+
+    # Free up memory ASAP
+    request.stacks[stackIndex] = []
+
+    response['symbolicatedStacks'].append(symbolicatedStack)
+
+  response['knownModules'] = request.knownModules[:]
+  if not request.includeKnownModulesInResponse:
+    response = response['symbolicatedStacks']
+
+  request.Reset()
+
+  return json.dumps(response)
 
 class DebugHandler(RequestHandler):
   def get(self, path):
@@ -122,11 +118,14 @@ class DebugHandler(RequestHandler):
       self.set_header("Content-type", "application/json")
 
 class SymbolHandler(RequestHandler):
-  # suppress most built-in logging
-  def log_request(self, code='-', size='-'): pass
-  def log_message(self, formats, *args): pass
-  def log_error(self, *args):
-    LogError(args[0] % tuple(args[1:]))
+  def LogDebug(self, string):
+    LogDebug(string, self.request.remote_ip)
+
+  def LogMessage(self, string):
+    LogMessage(string, self.request.remote_ip)
+
+  def LogError(self, string):
+    LogError(string, self.request.remote_ip)
 
   def sendHeaders(self, errorCode):
     self.set_status(errorCode)
@@ -140,43 +139,40 @@ class SymbolHandler(RequestHandler):
 
   @tornado.gen.coroutine
   def post(self):
-    LogDebug("Received request from " + self.request.remote_ip)
+    self.LogDebug("Received request")
 
     try:
       CheckDebug()
-      length = int(self.request.headers.get("Content-Length"))
       requestBody = self.request.body
-
-      if len(requestBody) < length:
-        # This could be a broken connection, writing an error message into it could be a bad idea
-        # See http://bugs.python.org/issue14574
-        LogDebug("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
-        return
 
       # vdjeric: temporary hack to stop a spammy request
       if "\"Bolt\"" in requestBody:
         self.sendHeaders(400)
         return
 
-      LogDebug("Request body: " + requestBody)
+      self.LogDebug("Request body: " + requestBody)
 
-      response = yield gPool.submit(processSymbolicationRequest, requestBody)
+      response = yield gPool.submit(
+                  processSymbolicationRequest,
+                  requestBody,
+                  self.request.remote_ip)
+
       if response is None:
-        LogDebug("Unable to parse request")
+        self.LogDebug("Unable to parse request")
         self.sendHeaders(400)
         return
     except Exception as e:
-      LogDebug("Unable to parse request body: " + str(e))
+      self.LogDebug("Unable to parse request body: " + str(e))
       # Ensure connection is back in blocking mode so rfile/wfile can be used safely
       self.sendHeaders(400)
       return
 
     try:
       self.sendHeaders(200)
-      LogDebug("Response: " + response)
+      self.LogDebug("Response: " + response)
       self.write(response)
     except Exception as e:
-      LogError("Exception in post: " + str(e))
+      self.LogError("Exception in post: " + str(e))
 
 def ReadConfigFile():
   configFileData = []

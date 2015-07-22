@@ -57,7 +57,8 @@ def getModuleV3(libName, breakpadId):
   return ModuleV3(libName, breakpadId)
 
 class SymbolicationRequest:
-  def __init__(self, symFileManager, rawRequests):
+  def __init__(self, symFileManager, rawRequests, remoteIp):
+    self.remoteIp = remoteIp
     self.Reset()
     self.symFileManager = symFileManager
     self.stacks = []
@@ -65,6 +66,15 @@ class SymbolicationRequest:
     self.knownModules = []
     self.includeKnownModulesInResponse = True
     self.ParseRequests(rawRequests)
+
+  def LogDebug(self, string):
+    LogDebug(string, self.remoteIp)
+
+  def LogMessage(self, string):
+    LogMessage(string, self.remoteIp)
+
+  def LogError(self, string):
+    LogError(string, self.remoteIp)
 
   def Reset(self):
     self.symFileManager = None
@@ -82,54 +92,54 @@ class SymbolicationRequest:
 
     try:
       if not isinstance(rawRequests, dict):
-        LogDebug("Request is not a dictionary")
+        self.LogDebug("Request is not a dictionary")
         return
 
       if "version" not in rawRequests:
-        LogDebug("Request is missing 'version' field")
+        self.LogDebug("Request is missing 'version' field")
         return
       version = rawRequests["version"]
       if version != 2 and version != 3 and version != 4:
-        LogDebug("Invalid version: %s" % version)
+        self.LogDebug("Invalid version: %s" % version)
         return
 
       if "forwarded" in rawRequests:
         if not isinstance(rawRequests["forwarded"], (int, long)):
-          LogDebug("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
+          self.LogDebug("Invalid 'forwards' field: " + str(rawRequests["forwarded"]))
           return
         self.forwardCount = rawRequests["forwarded"]
 
       if "memoryMap" not in rawRequests:
-        LogDebug("Request is missing 'memoryMap' field")
+        self.LogDebug("Request is missing 'memoryMap' field")
         return
       memoryMap = rawRequests["memoryMap"]
       if not isinstance(memoryMap, list):
-        LogDebug("'memoryMap' field in request is not a list")
+        self.LogDebug("'memoryMap' field in request is not a list")
 
       if "stacks" not in rawRequests:
-        LogDebug("Request is missing 'stacks' field")
+        self.LogDebug("Request is missing 'stacks' field")
         return
       stacks = rawRequests["stacks"]
       if not isinstance(stacks, list):
-        LogDebug("'stacks' field in request is not a list")
+        self.LogDebug("'stacks' field in request is not a list")
         return
 
       # Check memory map is well-formatted
       cleanMemoryMap = []
       for module in memoryMap:
         if not isinstance(module, list):
-          LogDebug("Entry in memory map is not a list: " + str(module))
+          self.LogDebug("Entry in memory map is not a list: " + str(module))
           return
 
         if version == 2:
           if len(module) != 4:
-            LogDebug("Entry in memory map is not a 4 item list: " + str(module))
+            self.LogDebug("Entry in memory map is not a 4 item list: " + str(module))
             return
           module = getModuleV2(*module)
         else:
           assert version == 3 or version == 4
           if len(module) != 2:
-            LogDebug("Entry in memory map is not a 2 item list: " + str(module))
+            self.LogDebug("Entry in memory map is not a 2 item list: " + str(module))
             return
           module = getModuleV3(*module)
 
@@ -147,26 +157,26 @@ class SymbolicationRequest:
       # Check stack is well-formatted
       for stack in stacks:
         if not isinstance(stack, list):
-          LogDebug("stack is not a list")
+          self.LogDebug("stack is not a list")
           return
         for entry in stack:
           if not isinstance(entry, list):
-            LogDebug("stack entry is not a list")
+            self.LogDebug("stack entry is not a list")
             return
           if len(entry) != 2:
-            LogDebug("stack entry doesn't have exactly 2 elements")
+            self.LogDebug("stack entry doesn't have exactly 2 elements")
             return
 
         self.stacks.append(stack)
 
     except Exception as e:
-      LogDebug("Exception while parsing request: " + str(e))
+      self.LogDebug("Exception while parsing request: " + str(e))
       return
 
     self.isValidRequest = True
 
   def ForwardRequest(self, indexes, stack, modules, symbolicatedStack):
-    LogDebug("Forwarding " + str(len(stack)) + " PCs for symbolication")
+    self.LogDebug("Forwarding " + str(len(stack)) + " PCs for symbolication")
 
     try:
       url = self.symFileManager.sOptions["remoteSymbolServer"]
@@ -209,13 +219,13 @@ class SymbolicationRequest:
         break
 
     except Exception as e:
-      LogError("Exception while forwarding request: " + str(e))
+      self.LogError("Exception while forwarding request: " + str(e))
       return
 
     try:
       responseJson = json.loads(response.read())
     except Exception as e:
-      LogError("Exception while reading server response to forwarded request: " + str(e))
+      self.LogError("Exception while reading server response to forwarded request: " + str(e))
       return
 
     try:
@@ -229,7 +239,7 @@ class SymbolicationRequest:
       else:
         responseSymbols = responseJson[0]
       if len(responseSymbols) != len(stack):
-        LogError(str(len(responseSymbols)) + " symbols in response, " + str(len(stack)) + " PCs in request!")
+        self.LogError(str(len(responseSymbols)) + " symbols in response, " + str(len(stack)) + " PCs in request!")
         return
 
       for index in range(0, len(stack)):
@@ -237,7 +247,7 @@ class SymbolicationRequest:
         originalIndex = indexes[index]
         symbolicatedStack[originalIndex] = symbol
     except Exception as e:
-      LogError("Exception while parsing server response to forwarded request: " + str(e))
+      self.LogError("Exception while parsing server response to forwarded request: " + str(e))
       return
 
   def Symbolicate(self, stackNum):
