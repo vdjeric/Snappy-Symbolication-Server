@@ -144,14 +144,7 @@ class SymbolHandler(RequestHandler):
 
     try:
       CheckDebug()
-      length = int(self.request.headers.get("Content-Length"))
       requestBody = self.request.body
-
-      if len(requestBody) < length:
-        # This could be a broken connection, writing an error message into it could be a bad idea
-        # See http://bugs.python.org/issue14574
-        LogDebug("Read " + str(len(requestBody)) + " bytes but Content-Length is " + str(length))
-        return
 
       # vdjeric: temporary hack to stop a spammy request
       if "\"Bolt\"" in requestBody:
