@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import threading
 import time
 import urllib2
 import urlparse
@@ -33,7 +32,6 @@ class SymFileManager:
   # Symbol cache data structures
   sCache = {}
   sCacheCount = 0
-  sCacheLock = threading.Lock()
   sMruSymbols = []
   sUpdateMRUFile = True
 
@@ -51,13 +49,9 @@ class SymFileManager:
 
     # Check cache first
     libSymbolMap = None
-    self.sCacheLock.acquire()
-    try:
-      if libName in self.sCache and breakpadId in self.sCache[libName]:
-        libSymbolMap = self.sCache[libName][breakpadId]
-        self.UpdateMruList(libName, breakpadId)
-    finally:
-      self.sCacheLock.release()
+    if libName in self.sCache and breakpadId in self.sCache[libName]:
+      libSymbolMap = self.sCache[libName][breakpadId]
+      self.UpdateMruList(libName, breakpadId)
 
     if libSymbolMap is None:
       LogDebug("Need to fetch PDB file for " + libName + " " + breakpadId)
@@ -91,17 +85,13 @@ class SymFileManager:
         return None
 
       LogDebug("Storing libSymbolMap under [" + libName + "][" + breakpadId + "]")
-      self.sCacheLock.acquire()
-      try:
-        self.MaybeEvict(libSymbolMap.GetEntryCount())
-        if libName not in self.sCache:
-          self.sCache[libName] = {}
-        self.sCache[libName][breakpadId] = libSymbolMap
-        self.sCacheCount += libSymbolMap.GetEntryCount()
-        self.UpdateMruList(libName, breakpadId)
-        LogDebug(str(self.sCacheCount) + " symbols in cache after fetching symbol file")
-      finally:
-        self.sCacheLock.release()
+      self.MaybeEvict(libSymbolMap.GetEntryCount())
+      if libName not in self.sCache:
+        self.sCache[libName] = {}
+      self.sCache[libName][breakpadId] = libSymbolMap
+      self.sCacheCount += libSymbolMap.GetEntryCount()
+      self.UpdateMruList(libName, breakpadId)
+      LogDebug(str(self.sCacheCount) + " symbols in cache after fetching symbol file")
 
     return libSymbolMap
 

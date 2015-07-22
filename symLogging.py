@@ -1,8 +1,6 @@
 import sys
-import threading
 import time
 import logging
-import os.path
 import os
 import tempfile
 from logging.handlers import RotatingFileHandler
@@ -19,10 +17,11 @@ def mkdir_p(path):
 def SetLoggingOptions(logOptions):
   global gLog
 
+  gLog = logging.getLogger("tornado.application")
+
   fmt = logging.Formatter('%(asctime)s\t%(levelname)s\t%(message)s')
   streamHandler = logging.StreamHandler()
   streamHandler.setFormatter(fmt)
-  gLog = logging.getLogger("Snappy")
   gLog.addHandler(streamHandler)
 
   filepath = logOptions.get('logPath', tempfile.gettempdir())
@@ -49,8 +48,8 @@ def SetLoggingOptions(logOptions):
   gLog.setLevel(logLevel)
 
 def doLog(dbgLevel, string):
-    threadName = threading.currentThread().getName().ljust(12)
-    gLog.log(dbgLevel, "%s\t%s", threadName, string)
+  pid = os.getpid()
+  gLog.log(dbgLevel, "%d\t%s", pid, string)
 
 def LogDebug(string):
   if gLog.isEnabledFor(logging.DEBUG):
