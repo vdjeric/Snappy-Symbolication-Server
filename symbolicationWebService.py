@@ -122,12 +122,6 @@ class DebugHandler(RequestHandler):
       self.set_header("Content-type", "application/json")
 
 class SymbolHandler(RequestHandler):
-  # suppress most built-in logging
-  def log_request(self, code='-', size='-'): pass
-  def log_message(self, formats, *args): pass
-  def log_error(self, *args):
-    LogError(args[0] % tuple(args[1:]))
-
   def sendHeaders(self, errorCode):
     self.set_status(errorCode)
     self.set_header("Content-type", "application/json")
