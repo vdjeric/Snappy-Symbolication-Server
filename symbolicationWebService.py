@@ -252,10 +252,9 @@ def Main():
   LogMessage("Starting server with the following options:\n" + str(gOptions))
 
   app = Application([
-    url(r"/", SymbolHandler),
-    url(r"/gecko-profiler/", SymbolHandler),
     url(r'/(debug)', DebugHandler),
-    url(r'/(nodebug)', DebugHandler)])
+    url(r'/(nodebug)', DebugHandler),
+    url(r".*", SymbolHandler)])
 
   app.listen(gOptions['portNumber'], gOptions['hostname'])
 
