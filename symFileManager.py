@@ -9,6 +9,7 @@ import time
 import urllib2
 import urlparse
 from bisect import bisect
+from StringIO import StringIO
 from tempfile import NamedTemporaryFile
 
 class SymbolInfo:
@@ -109,6 +110,9 @@ class SymFileManager:
       with contextlib.closing(urllib2.urlopen(url)) as request:
         if request.getcode() != 200:
           return None
+        headers = request.info()
+        if headers.get("Content-Encoding", "").lower() == "gzip":
+          request = StringIO(request.read().decode('zlib'))
         LogMessage("Parsing SYM file at " + url)
         return self.FetchSymbolsFromFileObj(request)
     except Exception as e:
