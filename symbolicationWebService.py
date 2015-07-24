@@ -253,6 +253,7 @@ def Main():
 
   app = Application([
     url(r"/", SymbolHandler),
+    url(r"/gecko-profiler/", SymbolHandler),
     url(r'/(debug)', DebugHandler),
     url(r'/(nodebug)', DebugHandler)])
 
