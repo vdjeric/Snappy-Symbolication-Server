@@ -119,17 +119,21 @@ class DebugHandler(RequestHandler):
 
 class SymbolHandler(RequestHandler):
   def LogDebug(self, string):
-    LogDebug(string, self.request.remote_ip)
+    LogDebug(string, self.remoteIp)
 
   def LogMessage(self, string):
-    LogMessage(string, self.request.remote_ip)
+    LogMessage(string, self.remoteIp)
 
   def LogError(self, string):
-    LogError(string, self.request.remote_ip)
+    LogError(string, self.remoteIp)
 
   def sendHeaders(self, errorCode):
     self.set_status(errorCode)
     self.set_header("Content-type", "application/json")
+
+  def prepare(self):
+    xForwardIp = self.request.headers.get(" X-Forwarded-For")
+    self.remoteIp = self.request.remote_ip if not xForwardIp else xForwardIp
 
   def head(self):
     self.sendHeaders(200)
@@ -155,7 +159,7 @@ class SymbolHandler(RequestHandler):
       response = yield gPool.submit(
                   processSymbolicationRequest,
                   requestBody,
-                  self.request.remote_ip)
+                  self.remoteIp)
 
       if response is None:
         self.LogDebug("Unable to parse request")
