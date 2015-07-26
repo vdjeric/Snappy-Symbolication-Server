@@ -111,7 +111,8 @@ class SymFileManager:
         if request.getcode() != 200:
           return None
         headers = request.info()
-        if headers.get("Content-Encoding", "").lower() == "gzip":
+        contentEncoding = headers.get("Content-Encoding", "").lower()
+        if contentEncoding in ("gzip", "x-gzip", "deflate"):
           request = StringIO(request.read().decode('zlib'))
         LogMessage("Parsing SYM file at " + url)
         return self.FetchSymbolsFromFileObj(request)
