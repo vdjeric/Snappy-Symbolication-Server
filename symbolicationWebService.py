@@ -132,7 +132,7 @@ class SymbolHandler(RequestHandler):
     self.set_header("Content-type", "application/json")
 
   def prepare(self):
-    xForwardIp = self.request.headers.get(" X-Forwarded-For")
+    xForwardIp = self.request.headers.get("X-Forwarded-For")
     self.remoteIp = self.request.remote_ip if not xForwardIp else xForwardIp
 
   def head(self):
@@ -142,8 +142,8 @@ class SymbolHandler(RequestHandler):
     return self.post()
 
   @tornado.gen.coroutine
-  def post(self):
-    self.LogDebug("Received request")
+  def post(self, path):
+    self.LogDebug("Received request with path '{}'".format(path))
 
     try:
       CheckDebug()
@@ -258,7 +258,7 @@ def Main():
   app = Application([
     url(r'/(debug)', DebugHandler),
     url(r'/(nodebug)', DebugHandler),
-    url(r".*", SymbolHandler)])
+    url(r"(.*)", SymbolHandler)])
 
   app.listen(gOptions['portNumber'], gOptions['hostname'])
 
