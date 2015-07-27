@@ -123,16 +123,14 @@ class SymFileManager:
   def FetchSymbolsFromFileObj(self, symFile):
     try:
       symbolMap = {}
-      lineNum = 0
       publicCount = 0
       funcCount = 0
-      for line in symFile:
-        lineNum += 1
+      for lineNum, line in enumerate(symFile.readlines()):
         if line[0:7] == "PUBLIC ":
           line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 4:
-            LogDebug("Line " + str(lineNum) + " is messed")
+            LogDebug("Line " + str(lineNum + 1) + " is messed")
             continue
           address = int(fields[1], 16)
           symbolMap[address] = " ".join(fields[3:])
@@ -141,7 +139,7 @@ class SymFileManager:
           line = line.rstrip()
           fields = line.split(" ")
           if len(fields) < 5:
-            LogDebug("Line " + str(lineNum) + " is messed")
+            LogDebug("Line " + str(lineNum + 1) + " is messed")
             continue
           address = int(fields[1], 16)
           symbolMap[address] = " ".join(fields[4:])
