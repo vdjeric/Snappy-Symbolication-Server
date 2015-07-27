@@ -132,7 +132,7 @@ class SymbolHandler(RequestHandler):
     self.set_header("Content-type", "application/json")
 
   def prepare(self):
-    xForwardIp = self.request.headers.get(" X-Forwarded-For")
+    xForwardIp = self.request.headers.get("X-Forwarded-For")
     self.remoteIp = self.request.remote_ip if not xForwardIp else xForwardIp
 
   def head(self):
