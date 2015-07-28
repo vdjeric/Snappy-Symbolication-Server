@@ -9,6 +9,7 @@ import sys
 import os
 import time
 import json
+import signal
 import tempfile
 import ConfigParser
 from collections import OrderedDict as _default_dict
@@ -72,6 +73,9 @@ class CaseSensitiveConfigParser(ConfigParser.SafeConfigParser):
 
 def initializeSubprocess(options):
   global gSymFileManager
+
+  # Ignore ctrl-c in the subprocess
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
 
   # Setup logging in the child process
   SetLoggingOptions(options["Log"])
