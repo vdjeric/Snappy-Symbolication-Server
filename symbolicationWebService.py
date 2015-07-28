@@ -142,8 +142,8 @@ class SymbolHandler(RequestHandler):
   def head(self):
     self.sendHeaders(200)
 
-  def get(self):
-    return self.post()
+  def get(self, path):
+    return self.post(path)
 
   @tornado.gen.coroutine
   def post(self, path):
