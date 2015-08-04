@@ -7,7 +7,6 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 
 import sys
 import os
-import time
 import json
 import signal
 import tempfile
@@ -183,7 +182,6 @@ class SymbolHandler(RequestHandler):
       self.LogError("Exception in post: " + str(e))
 
 def ReadConfigFile():
-  configFileData = []
   if len(sys.argv) == 1:
     return True
   elif len(sys.argv) > 2:

@@ -1,5 +1,4 @@
-from symLogging import LogDebug, LogError, LogMessage, CheckDebug
-import symFileManager
+from symLogging import LogDebug, LogError, LogMessage
 
 import re
 import json
