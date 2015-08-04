@@ -13,11 +13,6 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-class ModuleV3:
-  def __init__(self, libName, breakpadId):
-    self.libName = libName
-    self.breakpadId = breakpadId
-
 def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if isinstance(pdbSig, basestring):
     matches = gPdbSigRE.match(pdbSig)
@@ -42,7 +37,7 @@ def getModuleV2(libName, pdbAge, pdbSig, pdbName):
   if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
     LogDebug("Bad PDB name: " + str(pdbName))
     return None
-  return ModuleV3(pdbName, pdbSig + pdbAge)
+  return (pdbName, pdbSig + pdbAge)
 
 def getModuleV3(libName, breakpadId):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
@@ -53,7 +48,7 @@ def getModuleV3(libName, breakpadId):
     LogDebug("Bad breakpad id: " + str(breakpadId))
     return None
 
-  return ModuleV3(libName, breakpadId)
+  return (libName, breakpadId)
 
 class SymbolicationRequest:
   def __init__(self, symFileManager, rawRequests, remoteIp):
@@ -183,7 +178,7 @@ class SymbolicationRequest:
       moduleToIndex = {}
       newIndexToOldIndex = {}
       for moduleIndex, m in modules:
-        l = [m.libName, m.breakpadId]
+        l = list(m)
         newModuleIndex = len(rawModules)
         rawModules.append(l)
         moduleToIndex[m] = newModuleIndex
@@ -264,9 +259,10 @@ class SymbolicationRequest:
     unresolvedModules = []
     stack = self.stacks[stackNum]
 
+    symbols = self.symFileManager.GetLibSymbolMaps(self.combinedMemoryMap)
     for moduleIndex, module in enumerate(self.combinedMemoryMap):
-      if not self.symFileManager.GetLibSymbolMap(module.libName, module.breakpadId):
-        missingSymFiles.append((module.libName, module.breakpadId))
+      if module not in symbols:
+        missingSymFiles.append(module)
         if shouldForwardRequests:
           unresolvedModules.append((moduleIndex, module))
       else:
@@ -281,21 +277,20 @@ class SymbolicationRequest:
         continue
       module = self.combinedMemoryMap[moduleIndex]
 
-      if (module.libName, module.breakpadId) in missingSymFiles:
+      if module in missingSymFiles:
         if shouldForwardRequests:
           unresolvedIndexes.append(pcIndex)
           unresolvedStack.append(entry)
-        symbolicatedStack.append(hex(offset) + " (in " + module.libName + ")")
+        symbolicatedStack.append(hex(offset) + " (in " + module[0] + ")")
         continue
 
       functionName = None
-      libSymbolMap = self.symFileManager.GetLibSymbolMap(module.libName,
-                                                         module.breakpadId)
+      libSymbolMap = symbols[module]
       functionName = libSymbolMap.Lookup(offset)
 
       if functionName == None:
         functionName = hex(offset)
-      symbolicatedStack.append(functionName + " (in " + module.libName + ")")
+      symbolicatedStack.append(functionName + " (in " + module[0] + ")")
 
     # Ask another server for help symbolicating unresolved addresses
     if len(unresolvedStack) > 0:
