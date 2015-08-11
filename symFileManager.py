@@ -8,6 +8,7 @@ import shutil
 import time
 import urllib2
 import urlparse
+import gzip
 from bisect import bisect
 from StringIO import StringIO
 from tempfile import NamedTemporaryFile
@@ -113,7 +114,11 @@ class SymFileManager:
         headers = request.info()
         contentEncoding = headers.get("Content-Encoding", "").lower()
         if contentEncoding in ("gzip", "x-gzip", "deflate"):
-          request = StringIO(request.read().decode('zlib'))
+          # We have to put it in a string IO because gzip looks for
+          # the "tell()" file object method
+          request = StringIO(request.read())
+          with gzip.GzipFile(fileobj=request) as f:
+            request = StringIO(f.read())
         LogMessage("Parsing SYM file at " + url)
         return self.FetchSymbolsFromFileObj(request)
     except Exception as e:
