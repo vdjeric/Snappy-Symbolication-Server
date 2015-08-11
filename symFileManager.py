@@ -114,11 +114,16 @@ class SymFileManager:
         headers = request.info()
         contentEncoding = headers.get("Content-Encoding", "").lower()
         if contentEncoding in ("gzip", "x-gzip", "deflate"):
+          data = request.read()
           # We have to put it in a string IO because gzip looks for
           # the "tell()" file object method
-          request = StringIO(request.read())
-          with gzip.GzipFile(fileobj=request) as f:
-            request = StringIO(f.read())
+          request = StringIO(data)
+          try:
+            with gzip.GzipFile(fileobj=request) as f:
+              request = StringIO(f.read())
+          except Exception:
+            request = StringIO(data.decode('zlib'))
+
         LogMessage("Parsing SYM file at " + url)
         return self.FetchSymbolsFromFileObj(request)
     except Exception as e:
