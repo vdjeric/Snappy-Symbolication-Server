@@ -77,6 +77,8 @@ def initializeSubprocess(options):
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
   # Setup logging in the child process
+  if "logPath" in options["Log"]:
+    options["Log"]["logPath"] = os.path.join(options["Log"]["logPath"], "subprocess")
   SetLoggingOptions(options["Log"])
 
   # Create the .SYM cache manager singleton
