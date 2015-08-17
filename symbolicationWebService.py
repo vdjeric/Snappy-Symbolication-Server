@@ -13,7 +13,7 @@ import tempfile
 import ConfigParser
 from collections import OrderedDict as _default_dict
 import tornado.gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.web import Application, RequestHandler, url
 
 # Report errors while symLogging is not configured yet
@@ -265,6 +265,10 @@ def Main():
   app.listen(gOptions['portNumber'], gOptions['hostname'])
 
   try:
+    # select on Windows doesn't return on ctrl-c, add a periodic
+    # callback to make ctrl-c responsive
+    if sys.platform == 'win32':
+        PeriodicCallback(lambda: None, 100).start()
     IOLoop.current().start()
   except KeyboardInterrupt:
     LogMessage("Received SIGINT, stopping...")
