@@ -7,14 +7,13 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 
 import sys
 import os
-import time
 import json
 import signal
 import tempfile
 import ConfigParser
 from collections import OrderedDict as _default_dict
 import tornado.gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.web import Application, RequestHandler, url
 
 # Report errors while symLogging is not configured yet
@@ -37,12 +36,7 @@ gOptions = {
   # Fallback server if symbol is not found locally
   "remoteSymbolServer": "",
   # Maximum number of symbol files to keep in memory
-  # "maxCacheEntries": 10 * 1000 * 1000,
-  "maxCacheEntries": 100,
-  # File in which to persist the list of most-recently-used symbols.
-  "mruSymbolStateFile": os.path.join(tempfile.gettempdir(), "snappy-mru-symbols.json"),
-  # Maximum number of symbol files to persist in the state file between runs.
-  "maxMRUSymbolsPersist": 10,
+  "maxMemCacheFiles": 400,
   # Paths to .SYM files
   "symbolPaths": [
     # Default to empty so users don't have to list anything in their config
@@ -50,7 +44,11 @@ gOptions = {
   ],
   # URLs to symbol stores
   "symbolURLs": [
-  ]
+  ],
+  # Symbol files cache path
+  "diskCachePath": os.path.join(tempfile.gettempdir(), 'snappy', 'cache'),
+  # Maximum number of cache files
+  "maxDiskCacheFiles": 1500
 }
 
 # Use a new class to make defaults case-sensitive
@@ -78,14 +76,12 @@ def initializeSubprocess(options):
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
   # Setup logging in the child process
+  if "logPath" in options["Log"]:
+    options["Log"]["logPath"] = os.path.join(options["Log"]["logPath"], "subprocess")
   SetLoggingOptions(options["Log"])
 
   # Create the .SYM cache manager singleton
   gSymFileManager = SymFileManager(options)
-
-  # Prefetch recent symbols
-  gSymFileManager.PrefetchRecentSymbolFiles()
-
 
 def processSymbolicationRequest(rawRequest, remoteIp):
   decodedRequest = json.loads(rawRequest)
@@ -182,8 +178,21 @@ class SymbolHandler(RequestHandler):
     except Exception as e:
       self.LogError("Exception in post: " + str(e))
 
+def SetConfigOptions(options):
+  for (option, value) in options:
+    if option not in gOptions:
+      logging.error("Unknown config option '" + option + "' in the 'General' section of config file")
+      return False
+    elif type(gOptions[option]) == int:
+      try:
+        value = int(value)
+      except ValueError:
+        logging.error("Integer value expected for config option '" + option + "'")
+        return False
+    gOptions[option] = value
+  return True
+
 def ReadConfigFile():
-  configFileData = []
   if len(sys.argv) == 1:
     return True
   elif len(sys.argv) > 2:
@@ -211,18 +220,10 @@ def ReadConfigFile():
     logging.error("'General' and 'Log' sections are mandatory in the config file")
     return False
 
-  generalSectionOptions = configParser.items("General")
-  for (option, value) in generalSectionOptions:
-    if option not in gOptions:
-      logging.error("Unknown config option '" + option + "' in the 'General' section of config file")
-      return False
-    elif type(gOptions[option]) == int:
-      try:
-        value = int(value)
-      except ValueError:
-        logging.error("Integer value expected for config option '" + option + "'")
-        return False
-    gOptions[option] = value
+  if not all(map(
+      lambda section: SetConfigOptions(configParser.items(section)),
+      ("General", "DiskCache", "MemoryCache"))):
+    return False
 
   # Get the list of symbol paths from the config file
   if configParser.has_section("SymbolPaths"):
@@ -267,6 +268,10 @@ def Main():
   app.listen(gOptions['portNumber'], gOptions['hostname'])
 
   try:
+    # select on Windows doesn't return on ctrl-c, add a periodic
+    # callback to make ctrl-c responsive
+    if sys.platform == 'win32':
+        PeriodicCallback(lambda: None, 100).start()
     IOLoop.current().start()
   except KeyboardInterrupt:
     LogMessage("Received SIGINT, stopping...")

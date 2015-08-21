@@ -1,18 +1,13 @@
-import sys
-import time
 import logging
 import os
 import tempfile
 from logging.handlers import RotatingFileHandler
+from symUtil import mkdir_p
 
 gLog = None
 
 # Whether to pause and launch debugger at CheckDebug breakpoints
 gDebug = False
-
-def mkdir_p(path):
-  if not os.path.exists(path):
-    os.makedirs(path)
 
 def SetLoggingOptions(logOptions):
   global gLog
