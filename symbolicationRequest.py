@@ -13,32 +13,6 @@ gPdbSigRE2 = re.compile("[0-9a-fA-F]{32}$")
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
 
-def getModuleV2(libName, pdbAge, pdbSig, pdbName):
-  if isinstance(pdbSig, basestring):
-    matches = gPdbSigRE.match(pdbSig)
-    if matches:
-      pdbSig = "".join(matches.groups()).upper()
-    elif gPdbSigRE2.match(pdbSig):
-      pdbSig = pdbSig.upper()
-    else:
-      LogDebug("Bad PDB signature: " + pdbSig)
-      return None
-  else:
-    LogDebug("Bad PDB signature: " + str(pdbSig))
-    return None
-
-  if isinstance(pdbAge, basestring):
-    pdbAge = int(pdbAge)
-  if not isinstance(pdbAge, (int, long)) or int(pdbAge) < 0:
-    LogDebug("Bad PDB age: " + str(pdbAge))
-    return None
-  pdbAge = (hex(pdbAge)[2:]).lower()
-
-  if not isinstance(pdbName, basestring) or not gLibNameRE.match(pdbName):
-    LogDebug("Bad PDB name: " + str(pdbName))
-    return None
-  return (pdbName, pdbSig + pdbAge)
-
 def getModuleV3(libName, breakpadId):
   if not isinstance(libName, basestring) or not gLibNameRE.match(libName):
     LogDebug("Bad library name: " + str(libName))
@@ -93,7 +67,7 @@ class SymbolicationRequest:
         self.LogDebug("Request is missing 'version' field")
         return
       version = rawRequests["version"]
-      if version != 2 and version != 3 and version != 4:
+      if version != 3 and version != 4:
         self.LogDebug("Invalid version: %s" % version)
         return
 
@@ -125,17 +99,10 @@ class SymbolicationRequest:
           self.LogDebug("Entry in memory map is not a list: " + str(module))
           return
 
-        if version == 2:
-          if len(module) != 4:
-            self.LogDebug("Entry in memory map is not a 4 item list: " + str(module))
-            return
-          module = getModuleV2(*module)
-        else:
-          assert version == 3 or version == 4
-          if len(module) != 2:
-            self.LogDebug("Entry in memory map is not a 2 item list: " + str(module))
-            return
-          module = getModuleV3(*module)
+        if len(module) != 2:
+          self.LogDebug("Entry in memory map is not a 2 item list: " + str(module))
+          return
+        module = getModuleV3(*module)
 
         if module is None:
           return
